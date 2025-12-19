@@ -1,4 +1,7 @@
-# Tidal for Lidarr
+# Tidal for Lidarr (RSS Fork)
+
+This is a fork of [TrevTV/Lidarr.Plugin.Tidal](https://github.com/TrevTV/Lidarr.Plugin.Tidal) with additional RSS-related fixes and enhancements.
+
 This plugin provides a Tidal indexer and downloader client for Lidarr.
 
 ## Installation
@@ -47,7 +50,7 @@ FROM ghcr.io/hotio/lidarr:pr-plugins
 RUN apk add --no-cache ffmpeg
 ```
 
-1. In Lidarr, go to `System -> Plugins`, paste `https://github.com/TrevTV/Lidarr.Plugin.Tidal` into the GitHub URL box, and press Install.
+1. In Lidarr, go to `System -> Plugins`, paste `https://github.com/mprachar/Lidarr.Plugin.Tidal-RSS` into the GitHub URL box, and press Install.
 2. Go into the Indexer settings and press Add. In the modal, choose `Tidal` (under Other at the bottom).
 3. Enter a path to use to store user data, press Test, it will error, press Cancel.
 4. Refresh the page, then re-open the Add screen and choose Tidal again.
