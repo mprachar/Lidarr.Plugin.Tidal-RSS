@@ -3,10 +3,10 @@
 	<PropertyGroup>
 		<TargetFrameworks>net8.0</TargetFrameworks>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-		<Version>1.0.0</Version>
-		<AssemblyVersion>1.0.0.0</AssemblyVersion>
-		<FileVersion>1.0.0.0</FileVersion>
-		<Description>Tidal plugin for Lidarr with RSS feed support for monitoring artist releases</Description>
+		<Version>10.1.0.42-rss.1</Version>
+		<AssemblyVersion>10.1.0.42</AssemblyVersion>
+		<FileVersion>10.1.0.42</FileVersion>
+		<Description>Tidal plugin for Lidarr with RSS feed support for monitoring artist releases. Fork of TrevTV/Lidarr.Plugin.Tidal 10.1.0.42</Description>
 		<Authors>mprachar</Authors>
 	</PropertyGroup>
 

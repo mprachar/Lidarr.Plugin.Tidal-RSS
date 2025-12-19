@@ -1,8 +1,28 @@
 # Tidal for Lidarr (RSS Fork)
 
-This is a fork of [TrevTV/Lidarr.Plugin.Tidal](https://github.com/TrevTV/Lidarr.Plugin.Tidal) with additional RSS-related fixes and enhancements.
+This is a fork of [TrevTV/Lidarr.Plugin.Tidal](https://github.com/TrevTV/Lidarr.Plugin.Tidal) with RSS feed support for monitoring artist releases.
 
 This plugin provides a Tidal indexer and downloader client for Lidarr.
+
+## Version History
+
+| This Fork | Based On | Changes |
+|-----------|----------|---------|
+| 10.1.0.42-rss.1 | TrevTV 10.1.0.42 | Added RSS feed support for artist monitoring |
+
+## RSS Feature (New in this fork)
+
+This fork adds RSS feed support, allowing Lidarr to automatically monitor and download new releases from your favorite Tidal artists.
+
+### RSS Configuration
+
+1. **RSS Artist IDs**: Comma-separated list of Tidal artist IDs to monitor
+   - Find artist IDs from Tidal URLs: `https://tidal.com/artist/7804` → ID is `7804`
+   - Example: `7804,1566,3520813`
+
+2. **RSS Days Back**: How many days back to look for new releases (default: 90)
+
+When configured, Lidarr's RSS sync will periodically check these artists for new album releases.
 
 ## Installation
 This requires your Lidarr setup to be using the `plugins` branch. My docker-compose is setup like the following.
