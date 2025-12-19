@@ -13,7 +13,7 @@ namespace NzbDrone.Core.Indexers.Tidal
     {
         public override string Name => "Tidal";
         public override string Protocol => nameof(TidalDownloadProtocol);
-        public override bool SupportsRss => false;
+        public override bool SupportsRss => true;
         public override bool SupportsSearch => true;
         public override int PageSize => 100;
         public override TimeSpan RateLimit => TimeSpan.FromSeconds(2);

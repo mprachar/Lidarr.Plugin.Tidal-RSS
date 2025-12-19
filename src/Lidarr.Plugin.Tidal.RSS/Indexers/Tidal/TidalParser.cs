@@ -20,7 +20,28 @@ namespace NzbDrone.Core.Indexers.Tidal
             var torrentInfos = new List<ReleaseInfo>();
             var content = new HttpResponse<TidalSearchResponse>(response.HttpResponse).Content;
 
+            // Check if this is an RSS request (artist albums) or a search request
+            var isRssRequest = response.HttpRequest.Headers.ContainsKey("X-Tidal-Request-Type")
+                && response.HttpRequest.Headers["X-Tidal-Request-Type"] == "RSS";
+
+            if (isRssRequest)
+            {
+                return ParseArtistAlbumsResponse(content);
+            }
+
+            return ParseSearchResponse(content);
+        }
+
+        private IList<ReleaseInfo> ParseSearchResponse(string content)
+        {
+            var torrentInfos = new List<ReleaseInfo>();
             var jsonResponse = JObject.Parse(content).ToObject<TidalSearchResponse>();
+
+            if (jsonResponse?.AlbumResults?.Items == null)
+            {
+                return torrentInfos;
+            }
+
             var releases = jsonResponse.AlbumResults.Items.Select(result => ProcessAlbumResult(result)).ToArray();
 
             foreach (var task in releases)
@@ -28,20 +49,67 @@ namespace NzbDrone.Core.Indexers.Tidal
                 torrentInfos.AddRange(task);
             }
 
-            foreach (var track in jsonResponse.TrackResults.Items)
+            if (jsonResponse.TrackResults?.Items != null)
             {
-                // make sure the album hasn't already been processed before doing this
-                if (!jsonResponse.AlbumResults.Items.Any(a => a.Id == track.Album.Id))
+                foreach (var track in jsonResponse.TrackResults.Items)
                 {
-                    var processTrackTask = ProcessTrackAlbumResultAsync(track);
-                    processTrackTask.Wait();
-                    if (processTrackTask.Result != null)
-                        torrentInfos.AddRange(processTrackTask.Result);
+                    // make sure the album hasn't already been processed before doing this
+                    if (!jsonResponse.AlbumResults.Items.Any(a => a.Id == track.Album.Id))
+                    {
+                        var processTrackTask = ProcessTrackAlbumResultAsync(track);
+                        processTrackTask.Wait();
+                        if (processTrackTask.Result != null)
+                            torrentInfos.AddRange(processTrackTask.Result);
+                    }
                 }
             }
 
             return torrentInfos
                 .OrderByDescending(o => o.Size)
+                .ToArray();
+        }
+
+        private IList<ReleaseInfo> ParseArtistAlbumsResponse(string content)
+        {
+            var torrentInfos = new List<ReleaseInfo>();
+            var json = JObject.Parse(content);
+
+            // Artist albums endpoint returns { "limit": N, "offset": N, "totalNumberOfItems": N, "items": [...] }
+            var items = json["items"]?.ToObject<TidalSearchResponse.Album[]>();
+
+            if (items == null || items.Length == 0)
+            {
+                return torrentInfos;
+            }
+
+            // Filter albums by configured days back
+            var daysBack = Settings.RssDaysBack > 0 ? Settings.RssDaysBack : 90;
+            var cutoffDate = DateTime.UtcNow.AddDays(-daysBack);
+
+            foreach (var album in items)
+            {
+                // Check release date to filter recent releases
+                DateTime? releaseDate = null;
+                if (DateTime.TryParse(album.ReleaseDate, out var parsedRelease))
+                {
+                    releaseDate = parsedRelease;
+                }
+                else if (DateTime.TryParse(album.StreamStartDate, out var parsedStream))
+                {
+                    releaseDate = parsedStream;
+                }
+
+                // Only include albums within the configured time window
+                if (releaseDate.HasValue && releaseDate.Value >= cutoffDate)
+                {
+                    var releases = ProcessAlbumResult(album);
+                    torrentInfos.AddRange(releases);
+                }
+            }
+
+            return torrentInfos
+                .OrderByDescending(o => o.PublishDate)
+                .ThenByDescending(o => o.Size)
                 .ToArray();
         }
 

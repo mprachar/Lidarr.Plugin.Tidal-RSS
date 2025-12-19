@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NLog;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.IndexerSearch.Definitions;
@@ -16,11 +17,61 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         public virtual IndexerPageableRequestChain GetRecentRequests()
         {
-            // this is a lazy implementation, just here so that lidarr has something to test against when saving settings 
             var pageableRequests = new IndexerPageableRequestChain();
-            pageableRequests.Add(GetRequests("never gonna give you up"));
+
+            // If artist IDs are configured, fetch their recent albums
+            if (!string.IsNullOrWhiteSpace(Settings.RssArtistIds))
+            {
+                var artistIds = Settings.RssArtistIds
+                    .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(id => id.Trim())
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .ToList();
+
+                if (artistIds.Any())
+                {
+                    pageableRequests.Add(GetArtistAlbumsRequests(artistIds));
+                    return pageableRequests;
+                }
+            }
+
+            // Fallback: use a generic search for recent music if no artists configured
+            Logger?.Debug("No RSS artist IDs configured, using fallback search");
+            pageableRequests.Add(GetRequests("new releases " + DateTime.UtcNow.Year));
 
             return pageableRequests;
+        }
+
+        private IEnumerable<IndexerRequest> GetArtistAlbumsRequests(List<string> artistIds)
+        {
+            EnsureTokenValid();
+
+            foreach (var artistId in artistIds)
+            {
+                var data = new Dictionary<string, string>()
+                {
+                    ["limit"] = $"{PageSize}",
+                    ["offset"] = "0",
+                };
+
+                var url = TidalAPI.Instance!.GetAPIUrl($"artists/{artistId}/albums", data);
+                var req = new IndexerRequest(url, HttpAccept.Json);
+                req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
+                req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
+                req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "RSS"); // Custom header to identify RSS requests in parser
+                yield return req;
+            }
+        }
+
+        private void EnsureTokenValid()
+        {
+            if (DateTime.UtcNow > TidalAPI.Instance.Client.ActiveUser.ExpirationDate)
+            {
+                if (TidalAPI.Instance.Client.ActiveUser.ExpirationDate == DateTime.MinValue)
+                    TidalAPI.Instance.Client.ForceRefreshToken().Wait();
+                else
+                    TidalAPI.Instance.Client.IsLoggedIn().Wait();
+            }
         }
 
         public IndexerPageableRequestChain GetSearchRequests(AlbumSearchCriteria searchCriteria)
@@ -43,14 +94,7 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         private IEnumerable<IndexerRequest> GetRequests(string searchParameters)
         {
-            if (DateTime.UtcNow > TidalAPI.Instance.Client.ActiveUser.ExpirationDate)
-            {
-                // ensure we always have an accurate expiration date
-                if (TidalAPI.Instance.Client.ActiveUser.ExpirationDate == DateTime.MinValue)
-                    TidalAPI.Instance.Client.ForceRefreshToken().Wait();
-                else
-                    TidalAPI.Instance.Client.IsLoggedIn().Wait(); // calls an internal function which handles refreshes if needed
-            }
+            EnsureTokenValid();
 
             for (var page = 0; page < MaxPages; page++)
             {
