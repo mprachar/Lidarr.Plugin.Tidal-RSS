@@ -3,6 +3,11 @@
 	<PropertyGroup>
 		<TargetFrameworks>net8.0</TargetFrameworks>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+		<Version>1.0.0</Version>
+		<AssemblyVersion>1.0.0.0</AssemblyVersion>
+		<FileVersion>1.0.0.0</FileVersion>
+		<Description>Tidal plugin for Lidarr with RSS feed support for monitoring artist releases</Description>
+		<Authors>mprachar</Authors>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -29,7 +34,7 @@
 	</PropertyGroup>
 
 	<Target Condition="'$(Configuration)' == 'Debug'" Name="PostBuild" AfterTargets="ILRepacker">
-		<Exec ContinueOnError="true" Command="COPY &quot;$(TargetPath)&quot; &quot;C:\ProgramData\Lidarr\plugins\TrevTV\Lidarr.Plugin.Tidal&quot;" />
+		<Exec ContinueOnError="true" Command="COPY &quot;$(TargetPath)&quot; &quot;C:\ProgramData\Lidarr\plugins\mprachar\Lidarr.Plugin.Tidal-RSS&quot;" />
 	</Target>
 
 </Project>
