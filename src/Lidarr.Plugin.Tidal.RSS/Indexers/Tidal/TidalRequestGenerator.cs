@@ -30,6 +30,18 @@ namespace NzbDrone.Core.Indexers.Tidal
 
                 if (artistIds.Any())
                 {
+                    // Check if we have valid cached results for ALL artists
+                    var cacheHours = Settings.RssCacheHours > 0 ? Settings.RssCacheHours : 24;
+                    if (TidalRssCache.HasValidCachedResults(artistIds, cacheHours))
+                    {
+                        Logger?.Info($"RSS Cache: Using cached results for {artistIds.Count} artists (cache valid for {cacheHours} hours)");
+                        // Return empty request chain - the parser will handle returning cached results
+                        // We add a single dummy request that signals to use cache
+                        pageableRequests.Add(GetCacheMarkerRequest(artistIds, cacheHours));
+                        return pageableRequests;
+                    }
+
+                    Logger?.Info($"RSS Cache: Fetching fresh data for {artistIds.Count} artists");
                     pageableRequests.Add(GetArtistAlbumsRequests(artistIds));
                     return pageableRequests;
                 }
@@ -40,6 +52,29 @@ namespace NzbDrone.Core.Indexers.Tidal
             pageableRequests.Add(GetRequests("new releases " + DateTime.UtcNow.Year));
 
             return pageableRequests;
+        }
+
+        private IEnumerable<IndexerRequest> GetCacheMarkerRequest(List<string> artistIds, int cacheHours)
+        {
+            // Create a minimal request to Tidal that we'll use to trigger cache retrieval
+            // We still need at least one valid request for the indexer to work
+            // But we'll mark it so the parser knows to use cached data
+            EnsureTokenValid();
+
+            var data = new Dictionary<string, string>()
+            {
+                ["limit"] = "1",
+                ["offset"] = "0",
+            };
+
+            // Just fetch minimal data from first artist to keep the HTTP pipeline happy
+            var url = TidalAPI.Instance!.GetAPIUrl($"artists/{artistIds.First()}/albums", data);
+            var req = new IndexerRequest(url, HttpAccept.Json);
+            req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
+            req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
+            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "RSS-USE-CACHE");
+            req.HttpRequest.Headers.Add("X-Tidal-Cache-Hours", cacheHours.ToString());
+            yield return req;
         }
 
         private IEnumerable<IndexerRequest> GetArtistAlbumsRequests(List<string> artistIds)
@@ -58,7 +93,8 @@ namespace NzbDrone.Core.Indexers.Tidal
                 var req = new IndexerRequest(url, HttpAccept.Json);
                 req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
                 req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
-                req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "RSS"); // Custom header to identify RSS requests in parser
+                req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "RSS");
+                req.HttpRequest.Headers.Add("X-Tidal-Artist-Id", artistId);
                 yield return req;
             }
         }

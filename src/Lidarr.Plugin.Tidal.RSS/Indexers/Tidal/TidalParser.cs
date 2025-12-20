@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+using NLog;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Plugin.Tidal;
@@ -13,22 +14,76 @@ namespace NzbDrone.Core.Indexers.Tidal
 {
     public class TidalParser : IParseIndexerResponse
     {
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
         public TidalIndexerSettings Settings { get; set; }
+
+        // Accumulate results across multiple artist requests for caching
+        private static readonly object _accumulatorLock = new();
+        private static List<ReleaseInfo> _accumulatedResults = new();
+        private static List<string> _processedArtistIds = new();
+        private static bool _isAccumulating = false;
 
         public IList<ReleaseInfo> ParseResponse(IndexerResponse response)
         {
-            var torrentInfos = new List<ReleaseInfo>();
             var content = new HttpResponse<TidalSearchResponse>(response.HttpResponse).Content;
 
-            // Check if this is an RSS request (artist albums) or a search request
-            var isRssRequest = response.HttpRequest.Headers.ContainsKey("X-Tidal-Request-Type")
-                && response.HttpRequest.Headers["X-Tidal-Request-Type"] == "RSS";
+            // Check request type from headers
+            var requestType = response.HttpRequest.Headers.ContainsKey("X-Tidal-Request-Type")
+                ? response.HttpRequest.Headers["X-Tidal-Request-Type"]
+                : "";
 
-            if (isRssRequest)
+            // Handle cache hit - return cached results
+            if (requestType == "RSS-USE-CACHE")
             {
-                return ParseArtistAlbumsResponse(content);
+                Logger.Debug("RSS Parser: Using cached results");
+                return TidalRssCache.GetCachedResults();
             }
 
+            // Handle fresh RSS request
+            if (requestType == "RSS")
+            {
+                var artistId = response.HttpRequest.Headers.ContainsKey("X-Tidal-Artist-Id")
+                    ? response.HttpRequest.Headers["X-Tidal-Artist-Id"]
+                    : "";
+
+                var results = ParseArtistAlbumsResponse(content);
+
+                // Accumulate results for caching
+                lock (_accumulatorLock)
+                {
+                    if (!_isAccumulating)
+                    {
+                        _isAccumulating = true;
+                        _accumulatedResults = new List<ReleaseInfo>();
+                        _processedArtistIds = new List<string>();
+                    }
+
+                    _accumulatedResults.AddRange(results);
+                    if (!string.IsNullOrEmpty(artistId))
+                    {
+                        _processedArtistIds.Add(artistId);
+                    }
+
+                    // Check if this might be the last request by comparing to configured artists
+                    var configuredArtists = Settings.RssArtistIds?
+                        .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(id => id.Trim())
+                        .Where(id => !string.IsNullOrEmpty(id))
+                        .ToList() ?? new List<string>();
+
+                    if (_processedArtistIds.Count >= configuredArtists.Count && configuredArtists.Count > 0)
+                    {
+                        // All artists processed, cache the accumulated results
+                        TidalRssCache.SetCachedResults(_processedArtistIds, _accumulatedResults);
+                        _isAccumulating = false;
+                    }
+                }
+
+                return results;
+            }
+
+            // Regular search request
             return ParseSearchResponse(content);
         }
 
