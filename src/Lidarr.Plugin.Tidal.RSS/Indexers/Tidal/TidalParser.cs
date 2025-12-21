@@ -152,7 +152,9 @@ namespace NzbDrone.Core.Indexers.Tidal
                                                 {
                                                     var albumReleases = ProcessAlbumResult(album);
                                                     releases.AddRange(albumReleases);
-                                                    Logger.Debug($"  -> Added album: {album.Title} by {album.Artists?.FirstOrDefault()?.Name}");
+                                                    var artistName = album.Artists?.FirstOrDefault()?.Name ?? "Unknown";
+                                                    var releaseDate = album.ReleaseDate ?? album.StreamStartDate ?? "Unknown";
+                                                    Logger.Info($"     [{releaseDate}] {artistName} - {album.Title}");
                                                 }
                                             }
                                         }
