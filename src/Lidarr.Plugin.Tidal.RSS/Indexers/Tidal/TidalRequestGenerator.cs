@@ -12,6 +12,7 @@ namespace NzbDrone.Core.Indexers.Tidal
     {
         private const int PageSize = 100;
         private const int MaxPages = 3;
+
         public TidalIndexerSettings Settings { get; set; }
         public Logger Logger { get; set; }
 
@@ -19,13 +20,20 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             var pageableRequests = new IndexerPageableRequestChain();
 
-            // Try to get new releases from Tidal's Home page (which has New Releases, Top Albums, etc.)
+            // Check cache first - only hit Tidal once per day (minimum 24 hours)
+            var cacheHours = Math.Max(Settings.RssCacheHours, 24);
+            if (TidalRssCache.HasValidCache(cacheHours))
+            {
+                // Return empty request chain - parser will use cached results
+                Logger?.Info("RSS: Using cached results, skipping Tidal API call");
+                pageableRequests.Add(GetCacheMarkerRequest());
+                return pageableRequests;
+            }
+
+            // Fetch fresh data from Tidal's Home page
             try
             {
-                Logger?.Info("RSS: Fetching Tidal Home page to find new releases...");
-                LogHomePageCategories();
-
-                // Use the home page request which contains New Releases, Top Albums, etc.
+                Logger?.Info("RSS: Fetching Tidal Home page for new releases...");
                 pageableRequests.Add(GetHomePageRequest());
                 return pageableRequests;
             }
@@ -39,64 +47,6 @@ namespace NzbDrone.Core.Indexers.Tidal
             pageableRequests.Add(GetRequests("new releases " + DateTime.UtcNow.Year));
 
             return pageableRequests;
-        }
-
-        private void LogHomePageCategories()
-        {
-            try
-            {
-                EnsureTokenValid();
-                var homeTask = TidalAPI.Instance!.Client.API.GetHomePage();
-                homeTask.Wait();
-                var homePage = homeTask.Result;
-
-                Logger?.Info("=== TIDAL HOME PAGE STRUCTURE ===");
-
-                // Log the top-level keys
-                foreach (var prop in homePage.Properties())
-                {
-                    Logger?.Info($"Top-level key: {prop.Name}");
-                }
-
-                // Try to find rows/categories
-                var rows = homePage["rows"];
-                if (rows != null)
-                {
-                    int rowIndex = 0;
-                    foreach (var row in rows)
-                    {
-                        var modules = row["modules"];
-                        if (modules != null)
-                        {
-                            foreach (var module in modules)
-                            {
-                                var title = module["title"]?.ToString() ?? "(no title)";
-                                var type = module["type"]?.ToString() ?? "(no type)";
-                                var itemCount = module["pagedList"]?["items"]?.Count() ?? module["items"]?.Count() ?? 0;
-                                Logger?.Info($"Row {rowIndex}: '{title}' (type: {type}, items: {itemCount})");
-                            }
-                        }
-                        rowIndex++;
-                    }
-                }
-
-                // Also check for tabs
-                var tabs = homePage["tabs"];
-                if (tabs != null)
-                {
-                    foreach (var tab in tabs)
-                    {
-                        var tabTitle = tab["title"]?.ToString() ?? "(no title)";
-                        Logger?.Info($"Tab: '{tabTitle}'");
-                    }
-                }
-
-                Logger?.Info("=== END HOME PAGE STRUCTURE ===");
-            }
-            catch (Exception ex)
-            {
-                Logger?.Error(ex, "Failed to log home page categories");
-            }
         }
 
         private IEnumerable<IndexerRequest> GetHomePageRequest()
@@ -115,49 +65,23 @@ namespace NzbDrone.Core.Indexers.Tidal
             yield return req;
         }
 
-        private IEnumerable<IndexerRequest> GetCacheMarkerRequest(List<string> artistIds, int cacheHours)
+        private IEnumerable<IndexerRequest> GetCacheMarkerRequest()
         {
-            // Create a minimal request to Tidal that we'll use to trigger cache retrieval
-            // We still need at least one valid request for the indexer to work
-            // But we'll mark it so the parser knows to use cached data
+            // Return a minimal marker request that tells the parser to use cached data
+            // We need at least one request for the indexer pipeline to work
             EnsureTokenValid();
 
-            var data = new Dictionary<string, string>()
+            var url = TidalAPI.Instance!.GetAPIUrl("pages/home", new Dictionary<string, string>
             {
-                ["limit"] = "1",
-                ["offset"] = "0",
-            };
+                ["deviceType"] = "BROWSER",
+                ["limit"] = "1"
+            });
 
-            // Just fetch minimal data from first artist to keep the HTTP pipeline happy
-            var url = TidalAPI.Instance!.GetAPIUrl($"artists/{artistIds.First()}/albums", data);
             var req = new IndexerRequest(url, HttpAccept.Json);
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
             req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
-            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "RSS-USE-CACHE");
-            req.HttpRequest.Headers.Add("X-Tidal-Cache-Hours", cacheHours.ToString());
+            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "CACHED");
             yield return req;
-        }
-
-        private IEnumerable<IndexerRequest> GetArtistAlbumsRequests(List<string> artistIds)
-        {
-            EnsureTokenValid();
-
-            foreach (var artistId in artistIds)
-            {
-                var data = new Dictionary<string, string>()
-                {
-                    ["limit"] = $"{PageSize}",
-                    ["offset"] = "0",
-                };
-
-                var url = TidalAPI.Instance!.GetAPIUrl($"artists/{artistId}/albums", data);
-                var req = new IndexerRequest(url, HttpAccept.Json);
-                req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
-                req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
-                req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "RSS");
-                req.HttpRequest.Headers.Add("X-Tidal-Artist-Id", artistId);
-                yield return req;
-            }
         }
 
         private void EnsureTokenValid()
@@ -174,18 +98,14 @@ namespace NzbDrone.Core.Indexers.Tidal
         public IndexerPageableRequestChain GetSearchRequests(AlbumSearchCriteria searchCriteria)
         {
             var chain = new IndexerPageableRequestChain();
-
             chain.AddTier(GetRequests($"{searchCriteria.ArtistQuery} {searchCriteria.AlbumQuery}"));
-
             return chain;
         }
 
         public IndexerPageableRequestChain GetSearchRequests(ArtistSearchCriteria searchCriteria)
         {
             var chain = new IndexerPageableRequestChain();
-
             chain.AddTier(GetRequests(searchCriteria.ArtistQuery));
-
             return chain;
         }
 

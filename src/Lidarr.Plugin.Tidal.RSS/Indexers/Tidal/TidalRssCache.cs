@@ -7,50 +7,45 @@ using NzbDrone.Core.Parser.Model;
 namespace NzbDrone.Core.Indexers.Tidal
 {
     /// <summary>
-    /// In-memory cache for Tidal RSS parsed results.
-    /// Reduces API calls when Lidarr's RSS sync runs more frequently than desired.
+    /// In-memory cache for Tidal Home page results.
+    /// Caches new releases from Tidal's home page to reduce API calls.
+    /// Enforces a minimum 24-hour cache to avoid hitting Tidal too frequently.
     /// </summary>
     public static class TidalRssCache
     {
         private static readonly object _lock = new();
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        private const int MinimumCacheHours = 24;
 
-        // Cache the final parsed results, keyed by a hash of all artist IDs
-        private static CachedRssResults _cachedResults;
+        private static CachedHomePageResults _cachedResults;
 
         /// <summary>
-        /// Checks if we have valid cached results for the specified artists.
+        /// Checks if we have valid cached results.
         /// </summary>
-        public static bool HasValidCachedResults(IEnumerable<string> artistIds, int cacheHours)
+        public static bool HasValidCache(int requestedCacheHours)
         {
             lock (_lock)
             {
                 if (_cachedResults == null)
                     return false;
 
-                // Check if the artist list matches
-                var requestedIds = string.Join(",", artistIds.OrderBy(x => x));
-                if (_cachedResults.ArtistIdsKey != requestedIds)
-                {
-                    Logger.Debug($"RSS Cache: Artist list changed, cache invalid");
-                    return false;
-                }
-
-                // Check cache age
+                // Enforce minimum 24 hours
+                var cacheHours = Math.Max(requestedCacheHours, MinimumCacheHours);
                 var age = DateTime.UtcNow - _cachedResults.FetchedAt;
+
                 if (age.TotalHours >= cacheHours)
                 {
-                    Logger.Debug($"RSS Cache: Expired (age: {age.TotalHours:F1} hours, max: {cacheHours} hours)");
+                    Logger.Info($"RSS Cache: Expired (age: {age.TotalHours:F1} hours, max: {cacheHours} hours)");
                     return false;
                 }
 
-                Logger.Debug($"RSS Cache: Valid (age: {age.TotalMinutes:F0} minutes, {_cachedResults.Releases.Count} releases)");
+                Logger.Info($"RSS Cache: Valid (age: {age.TotalHours:F1} hours, {_cachedResults.Releases.Count} releases cached)");
                 return true;
             }
         }
 
         /// <summary>
-        /// Gets the cached results. Only call after HasValidCachedResults returns true.
+        /// Gets the cached results. Only call after HasValidCache returns true.
         /// </summary>
         public static IList<ReleaseInfo> GetCachedResults()
         {
@@ -59,7 +54,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 if (_cachedResults == null)
                     return new List<ReleaseInfo>();
 
-                Logger.Info($"RSS Cache: Returning {_cachedResults.Releases.Count} cached releases");
+                Logger.Info($"RSS Cache: Returning {_cachedResults.Releases.Count} cached releases (fetched {(DateTime.UtcNow - _cachedResults.FetchedAt).TotalHours:F1} hours ago)");
                 return _cachedResults.Releases;
             }
         }
@@ -67,18 +62,16 @@ namespace NzbDrone.Core.Indexers.Tidal
         /// <summary>
         /// Stores parsed results in the cache.
         /// </summary>
-        public static void SetCachedResults(IEnumerable<string> artistIds, IList<ReleaseInfo> releases)
+        public static void SetCache(IList<ReleaseInfo> releases)
         {
             lock (_lock)
             {
-                var artistIdsKey = string.Join(",", artistIds.OrderBy(x => x));
-                _cachedResults = new CachedRssResults
+                _cachedResults = new CachedHomePageResults
                 {
-                    ArtistIdsKey = artistIdsKey,
                     Releases = releases.ToList(),
                     FetchedAt = DateTime.UtcNow
                 };
-                Logger.Info($"RSS Cache: Stored {releases.Count} releases for {artistIds.Count()} artists");
+                Logger.Info($"RSS Cache: Stored {releases.Count} releases");
             }
         }
 
@@ -94,24 +87,8 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
         }
 
-        /// <summary>
-        /// Gets cache statistics for logging.
-        /// </summary>
-        public static (int releaseCount, DateTime? fetchedAt, double? ageHours) GetStats()
+        private class CachedHomePageResults
         {
-            lock (_lock)
-            {
-                if (_cachedResults == null)
-                    return (0, null, null);
-
-                var age = DateTime.UtcNow - _cachedResults.FetchedAt;
-                return (_cachedResults.Releases.Count, _cachedResults.FetchedAt, age.TotalHours);
-            }
-        }
-
-        private class CachedRssResults
-        {
-            public string ArtistIdsKey { get; set; }
             public List<ReleaseInfo> Releases { get; set; }
             public DateTime FetchedAt { get; set; }
         }
