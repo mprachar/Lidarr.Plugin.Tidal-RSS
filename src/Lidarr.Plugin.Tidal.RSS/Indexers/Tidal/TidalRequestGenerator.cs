@@ -19,19 +19,19 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             var pageableRequests = new IndexerPageableRequestChain();
 
-            // Try to get new releases from Tidal's Explore page
+            // Try to get new releases from Tidal's Home page (which has New Releases, Top Albums, etc.)
             try
             {
-                Logger?.Info("RSS: Fetching Tidal Explore page to find new releases...");
-                LogExplorePageCategories();
+                Logger?.Info("RSS: Fetching Tidal Home page to find new releases...");
+                LogHomePageCategories();
 
-                // For now, use the explore page request
-                pageableRequests.Add(GetExplorePageRequest());
+                // Use the home page request which contains New Releases, Top Albums, etc.
+                pageableRequests.Add(GetHomePageRequest());
                 return pageableRequests;
             }
             catch (Exception ex)
             {
-                Logger?.Error(ex, "RSS: Failed to fetch Explore page, falling back to search");
+                Logger?.Error(ex, "RSS: Failed to fetch Home page, falling back to search");
             }
 
             // Fallback: use a generic search for recent music
@@ -41,25 +41,25 @@ namespace NzbDrone.Core.Indexers.Tidal
             return pageableRequests;
         }
 
-        private void LogExplorePageCategories()
+        private void LogHomePageCategories()
         {
             try
             {
                 EnsureTokenValid();
-                var exploreTask = TidalAPI.Instance!.Client.API.GetExplorePage();
-                exploreTask.Wait();
-                var explorePage = exploreTask.Result;
+                var homeTask = TidalAPI.Instance!.Client.API.GetHomePage();
+                homeTask.Wait();
+                var homePage = homeTask.Result;
 
-                Logger?.Info("=== TIDAL EXPLORE PAGE STRUCTURE ===");
+                Logger?.Info("=== TIDAL HOME PAGE STRUCTURE ===");
 
                 // Log the top-level keys
-                foreach (var prop in explorePage.Properties())
+                foreach (var prop in homePage.Properties())
                 {
                     Logger?.Info($"Top-level key: {prop.Name}");
                 }
 
                 // Try to find rows/categories
-                var rows = explorePage["rows"];
+                var rows = homePage["rows"];
                 if (rows != null)
                 {
                     int rowIndex = 0;
@@ -72,7 +72,8 @@ namespace NzbDrone.Core.Indexers.Tidal
                             {
                                 var title = module["title"]?.ToString() ?? "(no title)";
                                 var type = module["type"]?.ToString() ?? "(no type)";
-                                Logger?.Info($"Row {rowIndex}: '{title}' (type: {type})");
+                                var itemCount = module["pagedList"]?["items"]?.Count() ?? module["items"]?.Count() ?? 0;
+                                Logger?.Info($"Row {rowIndex}: '{title}' (type: {type}, items: {itemCount})");
                             }
                         }
                         rowIndex++;
@@ -80,7 +81,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 }
 
                 // Also check for tabs
-                var tabs = explorePage["tabs"];
+                var tabs = homePage["tabs"];
                 if (tabs != null)
                 {
                     foreach (var tab in tabs)
@@ -90,19 +91,19 @@ namespace NzbDrone.Core.Indexers.Tidal
                     }
                 }
 
-                Logger?.Info("=== END EXPLORE PAGE STRUCTURE ===");
+                Logger?.Info("=== END HOME PAGE STRUCTURE ===");
             }
             catch (Exception ex)
             {
-                Logger?.Error(ex, "Failed to log explore page categories");
+                Logger?.Error(ex, "Failed to log home page categories");
             }
         }
 
-        private IEnumerable<IndexerRequest> GetExplorePageRequest()
+        private IEnumerable<IndexerRequest> GetHomePageRequest()
         {
             EnsureTokenValid();
 
-            var url = TidalAPI.Instance!.GetAPIUrl("pages/explore", new Dictionary<string, string>
+            var url = TidalAPI.Instance!.GetAPIUrl("pages/home", new Dictionary<string, string>
             {
                 ["deviceType"] = "BROWSER"
             });
@@ -110,7 +111,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             var req = new IndexerRequest(url, HttpAccept.Json);
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
             req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
-            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "EXPLORE");
+            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "HOME");
             yield return req;
         }
 
