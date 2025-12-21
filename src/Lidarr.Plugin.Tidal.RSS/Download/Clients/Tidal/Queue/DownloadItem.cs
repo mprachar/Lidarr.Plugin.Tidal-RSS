@@ -75,7 +75,8 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
         public async Task DoDownload(TidalSettings settings, Logger logger, CancellationToken cancellation = default)
         {
             List<Task> tasks = new();
-            using SemaphoreSlim semaphore = new(3, 3);
+            // Reduced from 3 to 2 concurrent downloads to help prevent "Too many open files" errors
+            using SemaphoreSlim semaphore = new(2, 2);
             foreach (var (trackId, trackSize) in _tracks)
             {
                 tasks.Add(Task.Run(async () =>
@@ -202,9 +203,11 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
                 var newFilePath = Path.ChangeExtension(filePath, "mp3");
                 try
                 {
-                    var tagFile = TagLib.File.Create(filePath);
-                    var bitrate = tagFile.Properties.AudioBitrate;
-                    tagFile.Dispose();
+                    int bitrate;
+                    using (var tagFile = TagLib.File.Create(filePath))
+                    {
+                        bitrate = tagFile.Properties.AudioBitrate;
+                    }
 
                     FFMPEG.Reencode(filePath, newFilePath, bitrate);
                     if (File.Exists(filePath))
