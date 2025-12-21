@@ -19,39 +19,99 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             var pageableRequests = new IndexerPageableRequestChain();
 
-            // If artist IDs are configured, fetch their recent albums
-            if (!string.IsNullOrWhiteSpace(Settings.RssArtistIds))
+            // Try to get new releases from Tidal's Explore page
+            try
             {
-                var artistIds = Settings.RssArtistIds
-                    .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(id => id.Trim())
-                    .Where(id => !string.IsNullOrEmpty(id))
-                    .ToList();
+                Logger?.Info("RSS: Fetching Tidal Explore page to find new releases...");
+                LogExplorePageCategories();
 
-                if (artistIds.Any())
-                {
-                    // Check if we have valid cached results for ALL artists
-                    var cacheHours = Settings.RssCacheHours > 0 ? Settings.RssCacheHours : 24;
-                    if (TidalRssCache.HasValidCachedResults(artistIds, cacheHours))
-                    {
-                        Logger?.Info($"RSS Cache: Using cached results for {artistIds.Count} artists (cache valid for {cacheHours} hours)");
-                        // Return empty request chain - the parser will handle returning cached results
-                        // We add a single dummy request that signals to use cache
-                        pageableRequests.Add(GetCacheMarkerRequest(artistIds, cacheHours));
-                        return pageableRequests;
-                    }
-
-                    Logger?.Info($"RSS Cache: Fetching fresh data for {artistIds.Count} artists");
-                    pageableRequests.Add(GetArtistAlbumsRequests(artistIds));
-                    return pageableRequests;
-                }
+                // For now, use the explore page request
+                pageableRequests.Add(GetExplorePageRequest());
+                return pageableRequests;
+            }
+            catch (Exception ex)
+            {
+                Logger?.Error(ex, "RSS: Failed to fetch Explore page, falling back to search");
             }
 
-            // Fallback: use a generic search for recent music if no artists configured
-            Logger?.Debug("No RSS artist IDs configured, using fallback search");
+            // Fallback: use a generic search for recent music
+            Logger?.Debug("RSS: Using fallback search for new releases");
             pageableRequests.Add(GetRequests("new releases " + DateTime.UtcNow.Year));
 
             return pageableRequests;
+        }
+
+        private void LogExplorePageCategories()
+        {
+            try
+            {
+                EnsureTokenValid();
+                var exploreTask = TidalAPI.Instance!.Client.API.GetExplorePage();
+                exploreTask.Wait();
+                var explorePage = exploreTask.Result;
+
+                Logger?.Info("=== TIDAL EXPLORE PAGE STRUCTURE ===");
+
+                // Log the top-level keys
+                foreach (var prop in explorePage.Properties())
+                {
+                    Logger?.Info($"Top-level key: {prop.Name}");
+                }
+
+                // Try to find rows/categories
+                var rows = explorePage["rows"];
+                if (rows != null)
+                {
+                    int rowIndex = 0;
+                    foreach (var row in rows)
+                    {
+                        var modules = row["modules"];
+                        if (modules != null)
+                        {
+                            foreach (var module in modules)
+                            {
+                                var title = module["title"]?.ToString() ?? "(no title)";
+                                var type = module["type"]?.ToString() ?? "(no type)";
+                                Logger?.Info($"Row {rowIndex}: '{title}' (type: {type})");
+                            }
+                        }
+                        rowIndex++;
+                    }
+                }
+
+                // Also check for tabs
+                var tabs = explorePage["tabs"];
+                if (tabs != null)
+                {
+                    foreach (var tab in tabs)
+                    {
+                        var tabTitle = tab["title"]?.ToString() ?? "(no title)";
+                        Logger?.Info($"Tab: '{tabTitle}'");
+                    }
+                }
+
+                Logger?.Info("=== END EXPLORE PAGE STRUCTURE ===");
+            }
+            catch (Exception ex)
+            {
+                Logger?.Error(ex, "Failed to log explore page categories");
+            }
+        }
+
+        private IEnumerable<IndexerRequest> GetExplorePageRequest()
+        {
+            EnsureTokenValid();
+
+            var url = TidalAPI.Instance!.GetAPIUrl("pages/explore", new Dictionary<string, string>
+            {
+                ["deviceType"] = "BROWSER"
+            });
+
+            var req = new IndexerRequest(url, HttpAccept.Json);
+            req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
+            req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
+            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "EXPLORE");
+            yield return req;
         }
 
         private IEnumerable<IndexerRequest> GetCacheMarkerRequest(List<string> artistIds, int cacheHours)

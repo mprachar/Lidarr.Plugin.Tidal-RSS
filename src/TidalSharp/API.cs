@@ -50,6 +50,28 @@ public class API
 
     public async Task<JObject> GetVideo(string id, CancellationToken token = default) => await Call(HttpMethod.Get, $"videos/{id}", token: token);
 
+    /// <summary>
+    /// Get the Explore page which contains categories like "New Releases", "Top Albums", etc.
+    /// </summary>
+    public async Task<JObject> GetExplorePage(CancellationToken token = default) => await Call(HttpMethod.Get, "pages/explore",
+        urlParameters: new()
+        {
+            { "deviceType", "BROWSER" }
+        },
+        token: token
+    );
+
+    /// <summary>
+    /// Get the Home page which contains personalized recommendations
+    /// </summary>
+    public async Task<JObject> GetHomePage(CancellationToken token = default) => await Call(HttpMethod.Get, "pages/home",
+        urlParameters: new()
+        {
+            { "deviceType", "BROWSER" }
+        },
+        token: token
+    );
+
     public async Task<JObject> GetMix(string id, CancellationToken token = default)
     {
         var result = await Call(HttpMethod.Get, "pages/mix",

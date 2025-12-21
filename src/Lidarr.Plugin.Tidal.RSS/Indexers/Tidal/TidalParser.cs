@@ -18,12 +18,6 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         public TidalIndexerSettings Settings { get; set; }
 
-        // Accumulate results across multiple artist requests for caching
-        private static readonly object _accumulatorLock = new();
-        private static List<ReleaseInfo> _accumulatedResults = new();
-        private static List<string> _processedArtistIds = new();
-        private static bool _isAccumulating = false;
-
         public IList<ReleaseInfo> ParseResponse(IndexerResponse response)
         {
             var content = new HttpResponse<TidalSearchResponse>(response.HttpResponse).Content;
@@ -33,54 +27,17 @@ namespace NzbDrone.Core.Indexers.Tidal
                 ? response.HttpRequest.Headers["X-Tidal-Request-Type"]
                 : "";
 
-            // Handle cache hit - return cached results
-            if (requestType == "RSS-USE-CACHE")
+            // Handle Explore page response - extract new releases
+            if (requestType == "EXPLORE")
             {
-                Logger.Debug("RSS Parser: Using cached results");
-                return TidalRssCache.GetCachedResults();
+                Logger.Info("RSS Parser: Parsing Explore page for new releases");
+                return ParseExplorePageResponse(content);
             }
 
-            // Handle fresh RSS request
+            // Handle artist albums RSS request (legacy, may be removed)
             if (requestType == "RSS")
             {
-                var artistId = response.HttpRequest.Headers.ContainsKey("X-Tidal-Artist-Id")
-                    ? response.HttpRequest.Headers["X-Tidal-Artist-Id"]
-                    : "";
-
-                var results = ParseArtistAlbumsResponse(content);
-
-                // Accumulate results for caching
-                lock (_accumulatorLock)
-                {
-                    if (!_isAccumulating)
-                    {
-                        _isAccumulating = true;
-                        _accumulatedResults = new List<ReleaseInfo>();
-                        _processedArtistIds = new List<string>();
-                    }
-
-                    _accumulatedResults.AddRange(results);
-                    if (!string.IsNullOrEmpty(artistId))
-                    {
-                        _processedArtistIds.Add(artistId);
-                    }
-
-                    // Check if this might be the last request by comparing to configured artists
-                    var configuredArtists = Settings.RssArtistIds?
-                        .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(id => id.Trim())
-                        .Where(id => !string.IsNullOrEmpty(id))
-                        .ToList() ?? new List<string>();
-
-                    if (_processedArtistIds.Count >= configuredArtists.Count && configuredArtists.Count > 0)
-                    {
-                        // All artists processed, cache the accumulated results
-                        TidalRssCache.SetCachedResults(_processedArtistIds, _accumulatedResults);
-                        _isAccumulating = false;
-                    }
-                }
-
-                return results;
+                return ParseArtistAlbumsResponse(content);
             }
 
             // Regular search request
@@ -121,6 +78,96 @@ namespace NzbDrone.Core.Indexers.Tidal
 
             return torrentInfos
                 .OrderByDescending(o => o.Size)
+                .ToArray();
+        }
+
+        private IList<ReleaseInfo> ParseExplorePageResponse(string content)
+        {
+            var releases = new List<ReleaseInfo>();
+
+            try
+            {
+                var json = JObject.Parse(content);
+
+                Logger.Info("=== EXPLORE PAGE RESPONSE STRUCTURE ===");
+
+                // Log top-level keys
+                foreach (var prop in json.Properties())
+                {
+                    Logger.Info($"Top-level key: {prop.Name}");
+                }
+
+                // Look for rows containing modules with albums
+                var rows = json["rows"];
+                if (rows != null)
+                {
+                    int rowIndex = 0;
+                    foreach (var row in rows)
+                    {
+                        var modules = row["modules"];
+                        if (modules != null)
+                        {
+                            foreach (var module in modules)
+                            {
+                                var title = module["title"]?.ToString() ?? "(no title)";
+                                var type = module["type"]?.ToString() ?? "(no type)";
+                                Logger.Info($"Row {rowIndex} Module: '{title}' (type: {type})");
+
+                                // Look for album lists - try to find "New" or "Release" in title
+                                if (title.Contains("New", StringComparison.OrdinalIgnoreCase) ||
+                                    title.Contains("Release", StringComparison.OrdinalIgnoreCase) ||
+                                    title.Contains("Album", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Logger.Info($"  -> Found potential new releases section: '{title}'");
+
+                                    // Try to extract albums from pagedList or items
+                                    var pagedList = module["pagedList"];
+                                    var items = pagedList?["items"] ?? module["items"];
+
+                                    if (items != null)
+                                    {
+                                        Logger.Info($"  -> Found {items.Count()} items");
+
+                                        foreach (var item in items)
+                                        {
+                                            try
+                                            {
+                                                // Check if this is an album
+                                                var itemType = item["type"]?.ToString();
+                                                if (itemType == "ALBUM" || item["numberOfTracks"] != null)
+                                                {
+                                                    var album = item.ToObject<TidalSearchResponse.Album>();
+                                                    if (album != null)
+                                                    {
+                                                        var albumReleases = ProcessAlbumResult(album);
+                                                        releases.AddRange(albumReleases);
+                                                        Logger.Debug($"  -> Added album: {album.Title} by {album.Artists?.FirstOrDefault()?.Name}");
+                                                    }
+                                                }
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                Logger.Debug($"  -> Failed to parse item: {ex.Message}");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        rowIndex++;
+                    }
+                }
+
+                Logger.Info($"=== END EXPLORE PAGE - Found {releases.Count} releases ===");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Failed to parse Explore page response");
+            }
+
+            return releases
+                .OrderByDescending(o => o.PublishDate)
+                .ThenByDescending(o => o.Size)
                 .ToArray();
         }
 
