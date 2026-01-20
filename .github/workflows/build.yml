@@ -52,6 +52,10 @@ jobs:
           sed -i'' -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>${{ steps.gen_meta.outputs.version }}<\/AssemblyVersion>/g" src/Directory.Build.props
           sed -i'' -e "s/<AssemblyConfiguration>[\$()A-Za-z-]\+<\/AssemblyConfiguration>/<AssemblyConfiguration>${{ steps.gen_meta.outputs.branch }}<\/AssemblyConfiguration>/g" src/Directory.Build.props
           sed -i'' -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$MINIMUM_LIDARR_VERSION<\/AssemblyVersion>/g" ext/Lidarr/src/Directory.Build.props
+          # Update plugin csproj version
+          sed -i'' -e "s/<Version>[0-9.]\+<\/Version>/<Version>${{ steps.gen_meta.outputs.version }}<\/Version>/g" src/Lidarr.Plugin.Tidal.RSS/Lidarr.Plugin.Tidal.RSS.csproj
+          sed -i'' -e "s/<AssemblyVersion>[0-9.]\+<\/AssemblyVersion>/<AssemblyVersion>${{ steps.gen_meta.outputs.version }}<\/AssemblyVersion>/g" src/Lidarr.Plugin.Tidal.RSS/Lidarr.Plugin.Tidal.RSS.csproj
+          sed -i'' -e "s/<FileVersion>[0-9.]\+<\/FileVersion>/<FileVersion>${{ steps.gen_meta.outputs.version }}<\/FileVersion>/g" src/Lidarr.Plugin.Tidal.RSS/Lidarr.Plugin.Tidal.RSS.csproj
       - name: Build
         run: |
           dotnet restore src/*.sln /p:WarningsNotAsErrors="NU1902"
