@@ -1,5 +1,17 @@
 # Lidarr.Plugin.Tidal-RSS - Claude Code Context
 
+> **Part of the Prachar Media Infrastructure ecosystem.**
+> See [prachflix-hub/MEDIA-INFRASTRUCTURE.md](../prachflix-hub/MEDIA-INFRASTRUCTURE.md) for architecture overview and cross-project documentation.
+
+| Related Projects | Purpose |
+|------------------|---------|
+| [PrachFlix](../PrachFlix/) | User-facing Wrapped reports for friends & family |
+| [Lidarr Tools](../Lidarr/) | Admin CLI for library maintenance (Mike only) |
+| **This project** | Lidarr plugin for Tidal integration |
+| [prachflix-hub](../prachflix-hub/) | Central documentation hub |
+
+---
+
 ## Project Overview
 Lidarr plugin adding Tidal as an indexer and downloader with RSS feed support for monitoring artist releases. Fork of [TrevTV/Lidarr.Plugin.Tidal](https://github.com/TrevTV/Lidarr.Plugin.Tidal).
 
