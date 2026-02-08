@@ -145,3 +145,11 @@ git merge upstream/main
 |---------|----------|-------------|
 | 10.1.0.43+ | TrevTV 10.1.0.42 | AdaptationSet.Group string fix, FFMPEG deadlock fix, RSS improvements |
 | 10.1.0.42-rss.1 | TrevTV 10.1.0.42 | Initial fork with RSS feed support |
+
+## Deep Dive Learnings
+
+Detailed investigation notes are stored in Claude auto-memory (not in repo). When working on these topics, ingest the corresponding file from `~/.claude/projects/.../memory/` before proceeding.
+
+| Topic | Memory File | Date |
+|-------|-------------|------|
+| *(No entries yet)* | | |
