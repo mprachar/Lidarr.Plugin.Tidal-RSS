@@ -153,12 +153,12 @@ namespace NzbDrone.Core.Indexers.Tidal
             EnsureTokenValid();
 
             // Use Tidal OpenAPI v2 endpoint for barcode lookup (v1 has no barcode endpoint)
+            // IMPORTANT: Do NOT set Content-Type or Accept headers on GET requests - Spring Boot misroutes them
             var url = $"https://openapi.tidal.com/v2/albums?filter[barcodeId]={barcode}&countryCode={TidalAPI.Instance!.Client.ActiveUser.CountryCode}";
 
             var req = new IndexerRequest(url, HttpAccept.Json);
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
             req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
-            req.HttpRequest.Headers.Add("Accept", "application/vnd.tidal.v1+json");
             req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "MB_BARCODE_LOOKUP");
             yield return req;
         }

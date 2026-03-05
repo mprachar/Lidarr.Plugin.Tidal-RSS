@@ -80,8 +80,6 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         private IList<ReleaseInfo> ParseBarcodeAlbumResponse(string content)
         {
-            // DIAGNOSTIC: Log raw response to determine v2 API compatibility
-            Logger.Info($"Barcode v2 API raw response (first 500 chars): {content?.Substring(0, Math.Min(content?.Length ?? 0, 500))}");
 
             try
             {
