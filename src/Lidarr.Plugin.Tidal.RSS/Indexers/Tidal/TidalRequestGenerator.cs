@@ -162,6 +162,9 @@ namespace NzbDrone.Core.Indexers.Tidal
             var countryCode = TidalAPI.Instance!.Client.ActiveUser.CountryCode;
             var url = $"https://openapi.tidal.com/v2/albums?filter[barcodeId]={barcode}&countryCode={countryCode}";
 
+            Logger?.Info($"Barcode request URL: {url}");
+            Logger?.Info($"Barcode auth header prefix: {authHeader?.Substring(0, Math.Min(authHeader?.Length ?? 0, 30))}...");
+
             var req = new IndexerRequest(url, HttpAccept.Json);
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
             req.HttpRequest.Headers.Add("Authorization", authHeader);

@@ -49,7 +49,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 // Refresh 60 seconds early to avoid edge cases
                 _expiresAt = DateTime.UtcNow.AddSeconds(expiresIn - 60);
 
-                Logger.Debug($"Tidal OpenAPI v2 token acquired, expires in {expiresIn}s");
+                Logger.Info($"Tidal OpenAPI v2 token acquired (type=THIRD_PARTY), expires in {expiresIn}s");
                 return $"Bearer {_accessToken}";
             }
             catch (Exception ex)
