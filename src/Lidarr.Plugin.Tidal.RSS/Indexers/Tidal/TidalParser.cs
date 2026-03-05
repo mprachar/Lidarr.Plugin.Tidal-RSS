@@ -46,15 +46,19 @@ namespace NzbDrone.Core.Indexers.Tidal
             // Direct album fetch from MusicBrainz cross-reference
             if (requestType == "MB_ALBUM_DIRECT")
             {
-                Logger.Info("Parsing MusicBrainz direct album lookup response");
-                return ParseDirectAlbumResponse(content);
+                var lidarrArtist = response.HttpRequest.Headers.ContainsKey("X-Tidal-Lidarr-Artist")
+                    ? response.HttpRequest.Headers["X-Tidal-Lidarr-Artist"]
+                    : null;
+                Logger.Info("Parsing MusicBrainz direct album lookup response" +
+                    (lidarrArtist != null ? $" (Lidarr artist override: {lidarrArtist})" : ""));
+                return ParseDirectAlbumResponse(content, lidarrArtist);
             }
 
             // Regular search request
             return ParseSearchResponse(content);
         }
 
-        private IList<ReleaseInfo> ParseDirectAlbumResponse(string content)
+        private IList<ReleaseInfo> ParseDirectAlbumResponse(string content, string lidarrArtistOverride = null)
         {
             try
             {
@@ -62,7 +66,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 if (album == null)
                     return new List<ReleaseInfo>();
 
-                return ProcessAlbumResult(album).ToList();
+                return ProcessAlbumResult(album, lidarrArtistOverride).ToList();
             }
             catch (Exception ex)
             {
@@ -187,7 +191,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 .ToArray();
         }
 
-        private IEnumerable<ReleaseInfo> ProcessAlbumResult(TidalSearchResponse.Album result)
+        private IEnumerable<ReleaseInfo> ProcessAlbumResult(TidalSearchResponse.Album result, string artistOverride = null)
         {
             // determine available audio qualities
             List<AudioQuality> qualityList = new() { AudioQuality.LOW, AudioQuality.HIGH };
@@ -202,7 +206,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 qualityList.Add(AudioQuality.LOSSLESS);
 
             var quality = Enum.Parse<AudioQuality>(result.AudioQuality);
-            return qualityList.Select(q => ToReleaseInfo(result, q));
+            return qualityList.Select(q => ToReleaseInfo(result, q, artistOverride));
         }
 
         private async Task<IEnumerable<ReleaseInfo>> ProcessTrackAlbumResultAsync(TidalSearchResponse.Track result)
@@ -218,7 +222,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
         }
 
-        private static ReleaseInfo ToReleaseInfo(TidalSearchResponse.Album x, AudioQuality bitrate)
+        private static ReleaseInfo ToReleaseInfo(TidalSearchResponse.Album x, AudioQuality bitrate, string artistOverride = null)
         {
             var publishDate = DateTime.UtcNow;
             var year = 0;
@@ -233,12 +237,13 @@ namespace NzbDrone.Core.Indexers.Tidal
                 year = startStreamDate.Year;
             }
 
+            var artistName = artistOverride ?? x.Artists.First().Name;
             var url = x.Url;
 
             var result = new ReleaseInfo
             {
                 Guid = $"Tidal-{x.Id}-{bitrate}",
-                Artist = x.Artists.First().Name,
+                Artist = artistName,
                 Album = x.Title,
                 DownloadUrl = url,
                 InfoUrl = url,
@@ -285,7 +290,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             var size = x.Duration * bps;
 
             result.Size = size;
-            result.Title = $"{x.Artists.First().Name} - {x.Title}";
+            result.Title = $"{artistName} - {x.Title}";
 
             if (year > 0)
             {

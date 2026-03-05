@@ -100,6 +100,12 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             var chain = new IndexerPageableRequestChain();
 
+            // Capture the Lidarr artist name for Tier 0 requests.
+            // For classical music, Lidarr uses the composer (e.g. "Franz Schubert") while
+            // Tidal uses the performer (e.g. "Alfred Brendel"). Passing the Lidarr name
+            // via header lets the parser substitute it, preventing "Wrong artist" rejections.
+            var lidarrArtistName = searchCriteria.ArtistQuery;
+
             // Tier 0: MusicBrainz cross-reference for exact Tidal album match
             var mbid = searchCriteria.Albums?.FirstOrDefault()?.ForeignAlbumId;
             if (!string.IsNullOrEmpty(mbid) && HttpClient != null)
@@ -110,7 +116,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 if (mbResult.HasTidalId)
                 {
                     Logger?.Info($"Tier 0 Strategy A: direct Tidal album {mbResult.TidalAlbumId} from MB URL relation");
-                    chain.Add(GetDirectAlbumRequest(mbResult.TidalAlbumId));
+                    chain.Add(GetDirectAlbumRequest(mbResult.TidalAlbumId, lidarrArtistName));
                 }
 
                 // Strategy B: Barcode lookup via Tidal OpenAPI v2, then direct album fetch via v1
@@ -120,7 +126,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                     foreach (var albumId in barcodeAlbumIds)
                     {
                         Logger?.Info($"Tier 0 Strategy B: barcode resolved to Tidal album {albumId}");
-                        chain.Add(GetDirectAlbumRequest(albumId));
+                        chain.Add(GetDirectAlbumRequest(albumId, lidarrArtistName));
                     }
                 }
             }
@@ -137,7 +143,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             return chain;
         }
 
-        private IEnumerable<IndexerRequest> GetDirectAlbumRequest(string tidalId)
+        private IEnumerable<IndexerRequest> GetDirectAlbumRequest(string tidalId, string lidarrArtistName = null)
         {
             EnsureTokenValid();
 
@@ -146,6 +152,8 @@ namespace NzbDrone.Core.Indexers.Tidal
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
             req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
             req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "MB_ALBUM_DIRECT");
+            if (!string.IsNullOrEmpty(lidarrArtistName))
+                req.HttpRequest.Headers.Add("X-Tidal-Lidarr-Artist", lidarrArtistName);
             yield return req;
         }
 

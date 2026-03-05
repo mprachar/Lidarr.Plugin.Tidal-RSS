@@ -76,7 +76,11 @@ namespace NzbDrone.Core.Download.Clients.Tidal
                 _ => throw new NotImplementedException(),
             };
 
-            var title = $"{x.Artist} - {x.Title} [WEB] [{format}]";
+            // Prefer Lidarr artist name (from search criteria) over Tidal artist name.
+            // This ensures CompletedDownloadService.GetArtist() can match the download
+            // to the correct Lidarr artist (important for classical music where composer ≠ performer).
+            var artistName = x.RemoteAlbum?.Artist?.Name ?? x.Artist;
+            var title = $"{artistName} - {x.Title} [WEB] [{format}]";
             if (x.Explicit)
             {
                 title += " [Explicit]";
