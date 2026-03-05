@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Newtonsoft.Json.Linq;
@@ -8,6 +10,22 @@ using NzbDrone.Common.Http;
 
 namespace NzbDrone.Core.Indexers.Tidal
 {
+    public struct MusicBrainzLookupResult
+    {
+        public string TidalAlbumId { get; }
+        public IReadOnlyList<string> Barcodes { get; }
+
+        public MusicBrainzLookupResult(string tidalAlbumId, IReadOnlyList<string> barcodes)
+        {
+            TidalAlbumId = tidalAlbumId;
+            Barcodes = barcodes ?? Array.Empty<string>();
+        }
+
+        public bool HasTidalId => !string.IsNullOrEmpty(TidalAlbumId);
+        public bool HasBarcodes => Barcodes.Count > 0;
+        public bool IsEmpty => !HasTidalId && !HasBarcodes;
+    }
+
     public static class MusicBrainzLookupService
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
@@ -20,16 +38,16 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         private const string UserAgent = "Lidarr.Plugin.Tidal-RSS/1.0 (https://github.com/mprachar/Lidarr.Plugin.Tidal-RSS)";
 
-        public static string LookupTidalAlbumId(string releaseGroupMbid, IHttpClient httpClient)
+        public static MusicBrainzLookupResult Lookup(string releaseGroupMbid, IHttpClient httpClient)
         {
             if (string.IsNullOrWhiteSpace(releaseGroupMbid))
-                return null;
+                return default;
 
             // Check cache
             if (Cache.TryGetValue(releaseGroupMbid, out var cached) && !cached.IsExpired)
             {
-                Logger.Debug($"MB lookup cache {(cached.TidalId != null ? "hit" : "miss (negative)")}: {releaseGroupMbid}");
-                return cached.TidalId;
+                Logger.Debug($"MB lookup cache hit: {releaseGroupMbid} (TidalId={cached.Result.TidalAlbumId ?? "null"}, Barcodes={cached.Result.Barcodes.Count})");
+                return cached.Result;
             }
 
             try
@@ -44,18 +62,20 @@ namespace NzbDrone.Core.Indexers.Tidal
                         Thread.Sleep(RateInterval - elapsed);
                     }
 
-                    var tidalId = QueryMusicBrainz(releaseGroupMbid, httpClient);
+                    var result = QueryMusicBrainz(releaseGroupMbid, httpClient);
                     _lastRequestTime = DateTime.UtcNow;
 
                     // Cache both hits and misses
-                    Cache[releaseGroupMbid] = new CachedResult(tidalId);
+                    Cache[releaseGroupMbid] = new CachedResult(result);
 
-                    if (tidalId != null)
-                        Logger.Info($"MB lookup found Tidal ID {tidalId} for release group {releaseGroupMbid}");
-                    else
-                        Logger.Debug($"MB lookup: no Tidal link for release group {releaseGroupMbid}");
+                    if (result.HasTidalId)
+                        Logger.Info($"MB lookup found Tidal ID {result.TidalAlbumId} for release group {releaseGroupMbid}");
+                    if (result.HasBarcodes)
+                        Logger.Info($"MB lookup found {result.Barcodes.Count} barcode(s) for release group {releaseGroupMbid}");
+                    if (result.IsEmpty)
+                        Logger.Debug($"MB lookup: no Tidal link or barcodes for release group {releaseGroupMbid}");
 
-                    return tidalId;
+                    return result;
                 }
                 finally
                 {
@@ -66,12 +86,12 @@ namespace NzbDrone.Core.Indexers.Tidal
             {
                 Logger.Warn(ex, $"MB lookup failed for {releaseGroupMbid}, falling back to text search");
                 // Cache the failure as a negative result to avoid hammering MB on errors
-                Cache[releaseGroupMbid] = new CachedResult(null);
-                return null;
+                Cache[releaseGroupMbid] = new CachedResult(default);
+                return default;
             }
         }
 
-        private static string QueryMusicBrainz(string releaseGroupMbid, IHttpClient httpClient)
+        private static MusicBrainzLookupResult QueryMusicBrainz(string releaseGroupMbid, IHttpClient httpClient)
         {
             var url = $"https://musicbrainz.org/ws/2/release?release-group={releaseGroupMbid}&inc=url-rels&fmt=json";
 
@@ -84,38 +104,53 @@ namespace NzbDrone.Core.Indexers.Tidal
             var releases = json["releases"];
 
             if (releases == null)
-                return null;
+                return default;
+
+            string tidalId = null;
+            var barcodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var release in releases)
             {
-                var relations = release["relations"];
-                if (relations == null)
-                    continue;
+                // Extract barcode
+                var barcode = release["barcode"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(barcode))
+                    barcodes.Add(barcode);
 
-                foreach (var relation in relations)
+                // Extract Tidal URL relation (only need the first one)
+                if (tidalId == null)
                 {
-                    var relUrl = relation["url"]?["resource"]?.ToString();
-                    if (string.IsNullOrEmpty(relUrl))
-                        continue;
+                    var relations = release["relations"];
+                    if (relations != null)
+                    {
+                        foreach (var relation in relations)
+                        {
+                            var relUrl = relation["url"]?["resource"]?.ToString();
+                            if (string.IsNullOrEmpty(relUrl))
+                                continue;
 
-                    var match = TidalAlbumUrlRegex.Match(relUrl);
-                    if (match.Success)
-                        return match.Groups[1].Value;
+                            var match = TidalAlbumUrlRegex.Match(relUrl);
+                            if (match.Success)
+                            {
+                                tidalId = match.Groups[1].Value;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
 
-            return null;
+            return new MusicBrainzLookupResult(tidalId, barcodes.ToList());
         }
 
         private class CachedResult
         {
-            public string TidalId { get; }
+            public MusicBrainzLookupResult Result { get; }
             public DateTime CreatedAt { get; }
             public bool IsExpired => DateTime.UtcNow - CreatedAt > CacheTtl;
 
-            public CachedResult(string tidalId)
+            public CachedResult(MusicBrainzLookupResult result)
             {
-                TidalId = tidalId;
+                Result = result;
                 CreatedAt = DateTime.UtcNow;
             }
         }

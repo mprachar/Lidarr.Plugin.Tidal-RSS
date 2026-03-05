@@ -50,6 +50,13 @@ namespace NzbDrone.Core.Indexers.Tidal
                 return ParseDirectAlbumResponse(content);
             }
 
+            // Barcode lookup from MusicBrainz cross-reference
+            if (requestType == "MB_BARCODE_LOOKUP")
+            {
+                Logger.Info("Parsing MusicBrainz barcode lookup response");
+                return ParseBarcodeAlbumResponse(content);
+            }
+
             // Regular search request
             return ParseSearchResponse(content);
         }
@@ -67,6 +74,46 @@ namespace NzbDrone.Core.Indexers.Tidal
             catch (Exception ex)
             {
                 Logger.Warn(ex, "Failed to parse MB direct album response, falling back to search");
+                return new List<ReleaseInfo>();
+            }
+        }
+
+        private IList<ReleaseInfo> ParseBarcodeAlbumResponse(string content)
+        {
+            try
+            {
+                var json = JObject.Parse(content);
+                var items = json["items"];
+                if (items == null || !items.Any())
+                {
+                    Logger.Debug("Barcode lookup returned no results");
+                    return new List<ReleaseInfo>();
+                }
+
+                var releases = new List<ReleaseInfo>();
+                foreach (var item in items)
+                {
+                    try
+                    {
+                        var album = item.ToObject<TidalSearchResponse.Album>();
+                        if (album != null)
+                        {
+                            releases.AddRange(ProcessAlbumResult(album));
+                            Logger.Debug($"Barcode lookup found: {album.Artists?.FirstOrDefault()?.Name} - {album.Title} (ID: {album.Id})");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"Failed to parse barcode album item: {ex.Message}");
+                    }
+                }
+
+                Logger.Info($"Barcode lookup returned {releases.Count} release(s)");
+                return releases;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex, "Failed to parse barcode album response");
                 return new List<ReleaseInfo>();
             }
         }

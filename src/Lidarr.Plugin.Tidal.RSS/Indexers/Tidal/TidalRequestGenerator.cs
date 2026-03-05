@@ -100,14 +100,27 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             var chain = new IndexerPageableRequestChain();
 
-            // Tier 0: MusicBrainz cross-reference lookup for exact Tidal album match
+            // Tier 0: MusicBrainz cross-reference for exact Tidal album match
             var mbid = searchCriteria.Albums?.FirstOrDefault()?.ForeignAlbumId;
             if (!string.IsNullOrEmpty(mbid) && HttpClient != null)
             {
-                var tidalId = MusicBrainzLookupService.LookupTidalAlbumId(mbid, HttpClient);
-                if (!string.IsNullOrEmpty(tidalId))
+                var mbResult = MusicBrainzLookupService.Lookup(mbid, HttpClient);
+
+                // Strategy A: Direct Tidal URL from MB relations
+                if (mbResult.HasTidalId)
                 {
-                    chain.AddTier(GetDirectAlbumRequest(tidalId));
+                    Logger?.Info($"Tier 0 Strategy A: direct Tidal album {mbResult.TidalAlbumId} from MB URL relation");
+                    chain.Add(GetDirectAlbumRequest(mbResult.TidalAlbumId));
+                }
+
+                // Strategy B: Barcode lookup on Tidal
+                if (mbResult.HasBarcodes)
+                {
+                    foreach (var barcode in mbResult.Barcodes)
+                    {
+                        Logger?.Info($"Tier 0 Strategy B: querying Tidal barcode {barcode}");
+                        chain.Add(GetBarcodeAlbumRequest(barcode));
+                    }
                 }
             }
 
@@ -132,6 +145,22 @@ namespace NzbDrone.Core.Indexers.Tidal
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
             req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
             req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "MB_ALBUM_DIRECT");
+            yield return req;
+        }
+
+        private IEnumerable<IndexerRequest> GetBarcodeAlbumRequest(string barcode)
+        {
+            EnsureTokenValid();
+
+            var url = TidalAPI.Instance!.GetAPIUrl("albums", new Dictionary<string, string>
+            {
+                ["barcode"] = barcode
+            });
+
+            var req = new IndexerRequest(url, HttpAccept.Json);
+            req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
+            req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
+            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "MB_BARCODE_LOOKUP");
             yield return req;
         }
 
