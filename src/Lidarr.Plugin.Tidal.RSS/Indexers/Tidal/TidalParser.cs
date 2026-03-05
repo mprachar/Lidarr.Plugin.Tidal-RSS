@@ -50,13 +50,6 @@ namespace NzbDrone.Core.Indexers.Tidal
                 return ParseDirectAlbumResponse(content);
             }
 
-            // Barcode lookup from MusicBrainz cross-reference
-            if (requestType == "MB_BARCODE_LOOKUP")
-            {
-                Logger.Info("Parsing MusicBrainz barcode lookup response");
-                return ParseBarcodeAlbumResponse(content);
-            }
-
             // Regular search request
             return ParseSearchResponse(content);
         }
@@ -74,58 +67,6 @@ namespace NzbDrone.Core.Indexers.Tidal
             catch (Exception ex)
             {
                 Logger.Warn(ex, "Failed to parse MB direct album response, falling back to search");
-                return new List<ReleaseInfo>();
-            }
-        }
-
-        private IList<ReleaseInfo> ParseBarcodeAlbumResponse(string content)
-        {
-            try
-            {
-                var json = JObject.Parse(content);
-
-                // v2 API returns JSON:API format: { "data": [ { "id": "123", "attributes": { ... } } ] }
-                var data = json["data"];
-                if (data == null || !data.Any())
-                {
-                    Logger.Debug("Barcode lookup returned no results");
-                    return new List<ReleaseInfo>();
-                }
-
-                // Extract album IDs from v2 response, then fetch full details from v1 API
-                // (v2 format is incompatible with our TidalSearchResponse.Album model)
-                var releases = new List<ReleaseInfo>();
-                foreach (var item in data)
-                {
-                    try
-                    {
-                        var albumId = item["id"]?.ToString();
-                        var title = item["attributes"]?["title"]?.ToString() ?? "unknown";
-                        if (string.IsNullOrEmpty(albumId))
-                            continue;
-
-                        Logger.Info($"Barcode lookup found album ID {albumId}: {title}");
-
-                        // Fetch full album from v1 API (same as Strategy A direct lookup)
-                        var album = TidalAPI.Instance.Client.API.GetAlbum(albumId).Result?.ToObject<TidalSearchResponse.Album>();
-                        if (album != null)
-                        {
-                            releases.AddRange(ProcessAlbumResult(album));
-                            Logger.Info($"Barcode match: {album.Artists?.FirstOrDefault()?.Name} - {album.Title} (ID: {album.Id})");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Debug($"Failed to fetch barcode album details: {ex.Message}");
-                    }
-                }
-
-                Logger.Info($"Barcode lookup returned {releases.Count} release(s)");
-                return releases;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn(ex, "Failed to parse barcode album response");
                 return new List<ReleaseInfo>();
             }
         }

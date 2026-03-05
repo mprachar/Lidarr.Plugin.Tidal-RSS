@@ -113,13 +113,14 @@ namespace NzbDrone.Core.Indexers.Tidal
                     chain.Add(GetDirectAlbumRequest(mbResult.TidalAlbumId));
                 }
 
-                // Strategy B: Barcode lookup on Tidal
+                // Strategy B: Barcode lookup via Tidal OpenAPI v2, then direct album fetch via v1
                 if (mbResult.HasBarcodes)
                 {
-                    foreach (var barcode in mbResult.Barcodes)
+                    var barcodeAlbumIds = LookupBarcodeAlbumIds(mbResult.Barcodes);
+                    foreach (var albumId in barcodeAlbumIds)
                     {
-                        Logger?.Info($"Tier 0 Strategy B: querying Tidal barcode {barcode}");
-                        chain.Add(GetBarcodeAlbumRequest(barcode));
+                        Logger?.Info($"Tier 0 Strategy B: barcode resolved to Tidal album {albumId}");
+                        chain.Add(GetDirectAlbumRequest(albumId));
                     }
                 }
             }
@@ -148,28 +149,65 @@ namespace NzbDrone.Core.Indexers.Tidal
             yield return req;
         }
 
-        private IEnumerable<IndexerRequest> GetBarcodeAlbumRequest(string barcode)
+        /// <summary>
+        /// Queries Tidal OpenAPI v2 for album IDs matching the given barcodes.
+        /// Uses System.Net.Http.HttpClient directly to bypass Lidarr's HTTP dispatcher,
+        /// which mangles requests to openapi.tidal.com (causing persistent 404s).
+        /// Returns album IDs that can be fetched via the v1 API (GetDirectAlbumRequest).
+        /// </summary>
+        private List<string> LookupBarcodeAlbumIds(IReadOnlyList<string> barcodes)
         {
-            // v2 OpenAPI requires a separate THIRD_PARTY token (client_credentials grant)
-            // The TidalSharp INTERNAL token does not work on openapi.tidal.com
+            var albumIds = new List<string>();
             var authHeader = TidalOpenApiToken.GetAuthorizationHeader(HttpClient);
             if (authHeader == null)
             {
                 Logger?.Warn("Cannot perform barcode lookup: failed to get OpenAPI v2 token");
-                yield break;
+                return albumIds;
             }
 
             var countryCode = TidalAPI.Instance!.Client.ActiveUser.CountryCode;
-            var url = $"https://openapi.tidal.com/v2/albums?filter%5BbarcodeId%5D={barcode}&countryCode={countryCode}";
+            using var client = new System.Net.Http.HttpClient();
 
-            Logger?.Info($"Barcode request URL: {url}");
-            Logger?.Info($"Barcode auth header prefix: {authHeader?.Substring(0, Math.Min(authHeader?.Length ?? 0, 30))}...");
+            foreach (var barcode in barcodes)
+            {
+                try
+                {
+                    var url = $"https://openapi.tidal.com/v2/albums?filter%5BbarcodeId%5D={barcode}&countryCode={countryCode}";
+                    var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url);
+                    request.Headers.TryAddWithoutValidation("Authorization", authHeader);
 
-            var req = new IndexerRequest(url, HttpAccept.Json);
-            req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
-            req.HttpRequest.Headers.Add("Authorization", authHeader);
-            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "MB_BARCODE_LOOKUP");
-            yield return req;
+                    var response = client.SendAsync(request).Result;
+                    var content = response.Content.ReadAsStringAsync().Result;
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Logger?.Warn($"Barcode lookup failed for {barcode}: HTTP {(int)response.StatusCode} - {content?.Substring(0, Math.Min(content?.Length ?? 0, 200))}");
+                        continue;
+                    }
+
+                    var json = Newtonsoft.Json.Linq.JObject.Parse(content);
+                    var data = json["data"];
+                    if (data != null)
+                    {
+                        foreach (var item in data)
+                        {
+                            var id = item["id"]?.ToString();
+                            var title = item["attributes"]?["title"]?.ToString() ?? "unknown";
+                            if (!string.IsNullOrEmpty(id) && !albumIds.Contains(id))
+                            {
+                                albumIds.Add(id);
+                                Logger?.Info($"Barcode {barcode} matched Tidal album {id}: {title}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger?.Warn($"Barcode lookup error for {barcode}: {ex.Message}");
+                }
+            }
+
+            return albumIds;
         }
 
         private IEnumerable<IndexerRequest> GetRequests(string searchParameters)
