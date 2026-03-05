@@ -61,7 +61,8 @@ namespace NzbDrone.Core.Indexers.Tidal
             return new TidalRequestGenerator()
             {
                 Settings = Settings,
-                Logger = _logger
+                Logger = _logger,
+                HttpClient = _httpClient
             };
         }
 

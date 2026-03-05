@@ -43,8 +43,32 @@ namespace NzbDrone.Core.Indexers.Tidal
                 return releases;
             }
 
+            // Direct album fetch from MusicBrainz cross-reference
+            if (requestType == "MB_ALBUM_DIRECT")
+            {
+                Logger.Info("Parsing MusicBrainz direct album lookup response");
+                return ParseDirectAlbumResponse(content);
+            }
+
             // Regular search request
             return ParseSearchResponse(content);
+        }
+
+        private IList<ReleaseInfo> ParseDirectAlbumResponse(string content)
+        {
+            try
+            {
+                var album = JObject.Parse(content).ToObject<TidalSearchResponse.Album>();
+                if (album == null)
+                    return new List<ReleaseInfo>();
+
+                return ProcessAlbumResult(album).ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn(ex, "Failed to parse MB direct album response, falling back to search");
+                return new List<ReleaseInfo>();
+            }
         }
 
         private IList<ReleaseInfo> ParseSearchResponse(string content)
@@ -168,12 +192,13 @@ namespace NzbDrone.Core.Indexers.Tidal
             // determine available audio qualities
             List<AudioQuality> qualityList = new() { AudioQuality.LOW, AudioQuality.HIGH };
 
-            if (result.MediaMetadata.Tags.Contains("HIRES_LOSSLESS"))
+            var tags = result.MediaMetadata?.Tags ?? Array.Empty<string>();
+            if (tags.Contains("HIRES_LOSSLESS"))
             {
                 qualityList.Add(AudioQuality.LOSSLESS);
                 qualityList.Add(AudioQuality.HI_RES_LOSSLESS);
             }
-            else if (result.MediaMetadata.Tags.Contains("LOSSLESS"))
+            else if (tags.Contains("LOSSLESS"))
                 qualityList.Add(AudioQuality.LOSSLESS);
 
             var quality = Enum.Parse<AudioQuality>(result.AudioQuality);

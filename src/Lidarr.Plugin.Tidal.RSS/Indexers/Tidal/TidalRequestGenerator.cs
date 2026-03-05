@@ -15,6 +15,7 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         public TidalIndexerSettings Settings { get; set; }
         public Logger Logger { get; set; }
+        public IHttpClient HttpClient { get; set; }
 
         public virtual IndexerPageableRequestChain GetRecentRequests()
         {
@@ -98,6 +99,19 @@ namespace NzbDrone.Core.Indexers.Tidal
         public IndexerPageableRequestChain GetSearchRequests(AlbumSearchCriteria searchCriteria)
         {
             var chain = new IndexerPageableRequestChain();
+
+            // Tier 0: MusicBrainz cross-reference lookup for exact Tidal album match
+            var mbid = searchCriteria.Albums?.FirstOrDefault()?.ForeignAlbumId;
+            if (!string.IsNullOrEmpty(mbid) && HttpClient != null)
+            {
+                var tidalId = MusicBrainzLookupService.LookupTidalAlbumId(mbid, HttpClient);
+                if (!string.IsNullOrEmpty(tidalId))
+                {
+                    chain.AddTier(GetDirectAlbumRequest(tidalId));
+                }
+            }
+
+            // Tier 1 (fallback): text search
             chain.AddTier(GetRequests($"{searchCriteria.ArtistQuery} {searchCriteria.AlbumQuery}"));
             return chain;
         }
@@ -107,6 +121,18 @@ namespace NzbDrone.Core.Indexers.Tidal
             var chain = new IndexerPageableRequestChain();
             chain.AddTier(GetRequests(searchCriteria.ArtistQuery));
             return chain;
+        }
+
+        private IEnumerable<IndexerRequest> GetDirectAlbumRequest(string tidalId)
+        {
+            EnsureTokenValid();
+
+            var url = TidalAPI.Instance!.GetAPIUrl($"albums/{tidalId}");
+            var req = new IndexerRequest(url, HttpAccept.Json);
+            req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
+            req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
+            req.HttpRequest.Headers.Add("X-Tidal-Request-Type", "MB_ALBUM_DIRECT");
+            yield return req;
         }
 
         private IEnumerable<IndexerRequest> GetRequests(string searchParameters)
