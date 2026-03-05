@@ -152,4 +152,4 @@ Detailed investigation notes are stored in Claude auto-memory (not in repo). Whe
 
 | Topic | Memory File | Date |
 |-------|-------------|------|
-| *(No entries yet)* | | |
+| Tidal OpenAPI v2 barcode lookup, HTTP dispatcher bypass, classical artist mismatch | `tidal-openapi-v2-barcode-lookup.md` | 2026-03-05 |
