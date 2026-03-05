@@ -22,7 +22,7 @@ namespace NzbDrone.Core.Indexers.Tidal
         }
 
         public bool HasTidalId => !string.IsNullOrEmpty(TidalAlbumId);
-        public bool HasBarcodes => Barcodes.Count > 0;
+        public bool HasBarcodes => Barcodes?.Count > 0;
         public bool IsEmpty => !HasTidalId && !HasBarcodes;
     }
 
@@ -36,7 +36,8 @@ namespace NzbDrone.Core.Indexers.Tidal
         private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
         private static readonly Regex TidalAlbumUrlRegex = new(@"tidal\.com(?:/browse)?/album/(\d+)", RegexOptions.Compiled);
 
-        private const string UserAgent = "Lidarr.Plugin.Tidal-RSS/1.0 (https://github.com/mprachar/Lidarr.Plugin.Tidal-RSS)";
+        // Note: Lidarr's HTTP dispatcher enforces its own User-Agent header.
+        // MusicBrainz requires a User-Agent, but Lidarr's default satisfies this.
 
         public static MusicBrainzLookupResult Lookup(string releaseGroupMbid, IHttpClient httpClient)
         {
@@ -96,7 +97,6 @@ namespace NzbDrone.Core.Indexers.Tidal
             var url = $"https://musicbrainz.org/ws/2/release?release-group={releaseGroupMbid}&inc=url-rels&fmt=json";
 
             var request = new HttpRequest(url);
-            request.Headers.Add("User-Agent", UserAgent);
             request.Headers.Accept = "application/json";
 
             var response = httpClient.Get(request);
