@@ -80,26 +80,34 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         private IList<ReleaseInfo> ParseBarcodeAlbumResponse(string content)
         {
+            // DIAGNOSTIC: Log raw response to determine v2 API compatibility
+            Logger.Info($"Barcode v2 API raw response (first 500 chars): {content?.Substring(0, Math.Min(content?.Length ?? 0, 500))}");
+
             try
             {
                 var json = JObject.Parse(content);
-                var items = json["items"];
+
+                // v2 API uses "data" array, v1 uses "items"
+                var items = json["data"] ?? json["items"];
                 if (items == null || !items.Any())
                 {
                     Logger.Debug("Barcode lookup returned no results");
                     return new List<ReleaseInfo>();
                 }
 
+                // For v2, each item has "resource" containing the album; for v1 it's direct
                 var releases = new List<ReleaseInfo>();
                 foreach (var item in items)
                 {
                     try
                     {
-                        var album = item.ToObject<TidalSearchResponse.Album>();
+                        // v2 format: { "data": [ { "resource": { "id": ..., "title": ... } } ] }
+                        var albumNode = item["resource"] ?? item;
+                        var album = albumNode.ToObject<TidalSearchResponse.Album>();
                         if (album != null)
                         {
                             releases.AddRange(ProcessAlbumResult(album));
-                            Logger.Debug($"Barcode lookup found: {album.Artists?.FirstOrDefault()?.Name} - {album.Title} (ID: {album.Id})");
+                            Logger.Info($"Barcode lookup found: {album.Artists?.FirstOrDefault()?.Name} - {album.Title} (ID: {album.Id})");
                         }
                     }
                     catch (Exception ex)
