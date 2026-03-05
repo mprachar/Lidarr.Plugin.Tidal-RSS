@@ -80,37 +80,43 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         private IList<ReleaseInfo> ParseBarcodeAlbumResponse(string content)
         {
-
             try
             {
                 var json = JObject.Parse(content);
 
-                // v2 API uses "data" array, v1 uses "items"
-                var items = json["data"] ?? json["items"];
-                if (items == null || !items.Any())
+                // v2 API returns JSON:API format: { "data": [ { "id": "123", "attributes": { ... } } ] }
+                var data = json["data"];
+                if (data == null || !data.Any())
                 {
                     Logger.Debug("Barcode lookup returned no results");
                     return new List<ReleaseInfo>();
                 }
 
-                // For v2, each item has "resource" containing the album; for v1 it's direct
+                // Extract album IDs from v2 response, then fetch full details from v1 API
+                // (v2 format is incompatible with our TidalSearchResponse.Album model)
                 var releases = new List<ReleaseInfo>();
-                foreach (var item in items)
+                foreach (var item in data)
                 {
                     try
                     {
-                        // v2 format: { "data": [ { "resource": { "id": ..., "title": ... } } ] }
-                        var albumNode = item["resource"] ?? item;
-                        var album = albumNode.ToObject<TidalSearchResponse.Album>();
+                        var albumId = item["id"]?.ToString();
+                        var title = item["attributes"]?["title"]?.ToString() ?? "unknown";
+                        if (string.IsNullOrEmpty(albumId))
+                            continue;
+
+                        Logger.Info($"Barcode lookup found album ID {albumId}: {title}");
+
+                        // Fetch full album from v1 API (same as Strategy A direct lookup)
+                        var album = TidalAPI.Instance.Client.API.GetAlbum(albumId).Result?.ToObject<TidalSearchResponse.Album>();
                         if (album != null)
                         {
                             releases.AddRange(ProcessAlbumResult(album));
-                            Logger.Info($"Barcode lookup found: {album.Artists?.FirstOrDefault()?.Name} - {album.Title} (ID: {album.Id})");
+                            Logger.Info($"Barcode match: {album.Artists?.FirstOrDefault()?.Name} - {album.Title} (ID: {album.Id})");
                         }
                     }
                     catch (Exception ex)
                     {
-                        Logger.Debug($"Failed to parse barcode album item: {ex.Message}");
+                        Logger.Debug($"Failed to fetch barcode album details: {ex.Message}");
                     }
                 }
 
