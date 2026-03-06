@@ -279,10 +279,12 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
 
             // estimated sizing as tidal doesn't provide exact sizes in its api
+            // LOSSLESS/HI_RES use FLAC-compressed estimates (~60% of raw PCM)
+            // Most hi-res content is 96kHz/24-bit, not 192kHz
             var bps = bitrate switch
             {
-                AudioQuality.HI_RES_LOSSLESS => 1152000,
-                AudioQuality.LOSSLESS => 176400,
+                AudioQuality.HI_RES_LOSSLESS => 345600, // 96kHz*24bit*2ch * 0.6 FLAC ratio
+                AudioQuality.LOSSLESS => 105840,         // 44.1kHz*16bit*2ch * 0.6 FLAC ratio
                 AudioQuality.HIGH => 40000,
                 AudioQuality.LOW => 12000,
                 _ => 40000

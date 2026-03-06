@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using NLog;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.IndexerSearch.Definitions;
@@ -94,6 +95,12 @@ namespace NzbDrone.Core.Indexers.Tidal
                 else
                     TidalAPI.Instance.Client.IsLoggedIn().Wait();
             }
+
+            if (string.IsNullOrEmpty(TidalAPI.Instance.Client.ActiveUser.CountryCode))
+            {
+                Logger?.Warn("CountryCode is empty after token refresh, re-fetching session data");
+                TidalAPI.Instance.Client.RefreshSession().Wait();
+            }
         }
 
         public IndexerPageableRequestChain GetSearchRequests(AlbumSearchCriteria searchCriteria)
@@ -174,39 +181,43 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
 
             var countryCode = TidalAPI.Instance!.Client.ActiveUser.CountryCode;
-            using var client = new System.Net.Http.HttpClient();
-
-            foreach (var barcode in barcodes)
+            if (string.IsNullOrEmpty(countryCode))
             {
+                Logger?.Warn("Barcode lookup skipped: countryCode is empty (session not initialized). Falling back to text search.");
+                return albumIds;
+            }
+
+            using var client = new System.Net.Http.HttpClient();
+            for (var i = 0; i < barcodes.Count; i++)
+            {
+                if (i > 0)
+                    Thread.Sleep(500);
+
+                var barcode = barcodes[i];
                 try
                 {
-                    var url = $"https://openapi.tidal.com/v2/albums?filter%5BbarcodeId%5D={barcode}&countryCode={countryCode}";
-                    var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url);
-                    request.Headers.TryAddWithoutValidation("Authorization", authHeader);
+                    var (success, matchedIds) = SendBarcodeRequest(client, barcode, countryCode, authHeader);
 
-                    var response = client.SendAsync(request).Result;
-                    var content = response.Content.ReadAsStringAsync().Result;
-
-                    if (!response.IsSuccessStatusCode)
+                    if (!success)
                     {
-                        Logger?.Warn($"Barcode lookup failed for {barcode}: HTTP {(int)response.StatusCode} - {content?.Substring(0, Math.Min(content?.Length ?? 0, 200))}");
-                        continue;
+                        // Retry once after 2s on rate limit
+                        Logger?.Warn($"Barcode {barcode}: rate limited, retrying in 2s...");
+                        Thread.Sleep(2000);
+                        (success, matchedIds) = SendBarcodeRequest(client, barcode, countryCode, authHeader);
+                        if (!success)
+                        {
+                            Logger?.Warn($"Barcode {barcode}: still rate limited after retry, skipping");
+                            continue;
+                        }
                     }
 
-                    var json = Newtonsoft.Json.Linq.JObject.Parse(content);
-                    var data = json["data"];
-                    if (data != null)
+                    if (matchedIds.Count > 0)
                     {
-                        foreach (var item in data)
-                        {
-                            var id = item["id"]?.ToString();
-                            var title = item["attributes"]?["title"]?.ToString() ?? "unknown";
-                            if (!string.IsNullOrEmpty(id) && !albumIds.Contains(id))
-                            {
-                                albumIds.Add(id);
-                                Logger?.Info($"Barcode {barcode} matched Tidal album {id}: {title}");
-                            }
-                        }
+                        albumIds.AddRange(matchedIds);
+                        var remaining = barcodes.Count - i - 1;
+                        if (remaining > 0)
+                            Logger?.Info($"Barcode {barcode}: found match, skipping remaining {remaining} barcodes");
+                        break;
                     }
                 }
                 catch (Exception ex)
@@ -216,6 +227,45 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
 
             return albumIds;
+        }
+
+        private (bool success, List<string> albumIds) SendBarcodeRequest(
+            System.Net.Http.HttpClient client, string barcode, string countryCode, string authHeader)
+        {
+            var url = $"https://openapi.tidal.com/v2/albums?filter%5BbarcodeId%5D={barcode}&countryCode={countryCode}";
+            var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("Authorization", authHeader);
+
+            var response = client.SendAsync(request).Result;
+            var content = response.Content.ReadAsStringAsync().Result;
+
+            if ((int)response.StatusCode == 429)
+                return (false, new List<string>());
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Logger?.Warn($"Barcode lookup failed for {barcode}: HTTP {(int)response.StatusCode} - {content?.Substring(0, Math.Min(content?.Length ?? 0, 200))}");
+                return (true, new List<string>());
+            }
+
+            var albumIds = new List<string>();
+            var json = Newtonsoft.Json.Linq.JObject.Parse(content);
+            var data = json["data"];
+            if (data != null)
+            {
+                foreach (var item in data)
+                {
+                    var id = item["id"]?.ToString();
+                    var title = item["attributes"]?["title"]?.ToString() ?? "unknown";
+                    if (!string.IsNullOrEmpty(id) && !albumIds.Contains(id))
+                    {
+                        albumIds.Add(id);
+                        Logger?.Info($"Barcode {barcode} matched Tidal album {id}: {title}");
+                    }
+                }
+            }
+
+            return (true, albumIds);
         }
 
         private IEnumerable<IndexerRequest> GetRequests(string searchParameters)

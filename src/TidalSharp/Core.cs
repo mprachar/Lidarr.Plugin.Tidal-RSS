@@ -86,6 +86,12 @@ public class TidalClient
         }
     }
 
+    public async Task RefreshSession(CancellationToken token = default)
+    {
+        if (ActiveUser != null)
+            await ActiveUser.GetSession(API, token);
+    }
+
     public string GetPkceLoginUrl() => _session.GetPkceLoginUrl();
 
     public void RegeneratePkceCodes() => _session.RegenerateCodes();

@@ -62,9 +62,12 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
         public AudioQuality Bitrate { get; private set; }
         public DownloadItemStatus Status { get; set; }
 
-        public float Progress { get => DownloadedSize / (float)Math.Max(TotalSize, 1); }
-        public long DownloadedSize { get; private set; }
+        public float Progress { get => _chunksDownloaded / (float)Math.Max(_chunksTotal, 1); }
+        public long DownloadedSize { get => (long)(Progress * TotalSize); }
         public long TotalSize { get; private set; }
+
+        private int _chunksDownloaded;
+        private int _chunksTotal;
 
         public int FailedTracks { get; private set; }
 
@@ -128,7 +131,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             if (!Directory.Exists(outDir))
                 Directory.CreateDirectory(outDir);
 
-            await TidalAPI.Instance.Client.Downloader.WriteRawTrackToFile(track, Bitrate, outPath, (i) => DownloadedSize++, cancellation);
+            await TidalAPI.Instance.Client.Downloader.WriteRawTrackToFile(track, Bitrate, outPath, (i) => _chunksDownloaded++, cancellation);
             outPath = HandleAudioConversion(outPath, settings);
 
             var plainLyrics = string.Empty;
@@ -247,7 +250,19 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             Title = album["title"]!.ToString();
             Artist = album["artist"]!["name"]!.ToString();
             Explicit = album["explicit"]!.Value<bool>();
-            TotalSize = _tracks.Sum(t => t.chunks);
+            _chunksTotal = _tracks.Sum(t => t.chunks);
+
+            // Estimate byte size from album duration and bitrate
+            var duration = album["duration"]?.Value<long>() ?? 0;
+            var bps = Bitrate switch
+            {
+                AudioQuality.HI_RES_LOSSLESS => 345600L,
+                AudioQuality.LOSSLESS => 105840L,
+                AudioQuality.HIGH => 40000L,
+                AudioQuality.LOW => 12000L,
+                _ => 40000L
+            };
+            TotalSize = duration * bps;
         }
 
         private static async Task CreateLrcFile(string lrcFilePath, string syncLyrics)
