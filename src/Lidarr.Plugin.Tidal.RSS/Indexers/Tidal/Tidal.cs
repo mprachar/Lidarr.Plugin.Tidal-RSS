@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using NLog;
 using NzbDrone.Common.Cache;
 using NzbDrone.Common.Http;
 using NzbDrone.Core.Configuration;
 using NzbDrone.Core.Download.Clients.Tidal;
 using NzbDrone.Core.Parser;
+using NzbDrone.Core.Parser.Model;
 using NzbDrone.Plugin.Tidal;
 
 namespace NzbDrone.Core.Indexers.Tidal
@@ -72,6 +75,24 @@ namespace NzbDrone.Core.Indexers.Tidal
             {
                 Settings = Settings
             };
+        }
+
+        protected override async Task<IList<ReleaseInfo>> FetchPage(IndexerRequest request, IParseIndexerResponse parser)
+        {
+            try
+            {
+                return await base.FetchPage(request, parser);
+            }
+            catch (Exception ex)
+            {
+                // Swallow ALL exceptions during fetch/parse to prevent RecordFailure from
+                // blocking the indexer. The Tidal API is unreliable (transient 401s, countryCode
+                // errors, stale sessions) and Lidarr's escalating backoff is too aggressive
+                // for a single-indexer setup. Log to persistent file for diagnostics.
+                _logger.Warn($"Tidal request failed (swallowed to prevent indexer block): {ex.Message}");
+                TidalRequestGenerator.WriteBlockTrap($"FetchPage swallowed: {request?.Url?.FullUri}", ex);
+                return new List<ReleaseInfo>();
+            }
         }
     }
 }
