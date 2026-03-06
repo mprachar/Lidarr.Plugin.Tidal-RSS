@@ -154,6 +154,18 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             EnsureTokenValid();
 
+            // Validate album exists on v1 API before adding to chain.
+            // A 404 here would propagate as an indexer failure and eventually block us.
+            try
+            {
+                TidalAPI.Instance!.Client.API.GetAlbum(tidalId).Wait();
+            }
+            catch (Exception ex)
+            {
+                Logger?.Warn($"Tidal album {tidalId} not available on v1 API, skipping: {ex.InnerException?.Message ?? ex.Message}");
+                yield break;
+            }
+
             var url = TidalAPI.Instance!.GetAPIUrl($"albums/{tidalId}");
             var req = new IndexerRequest(url, HttpAccept.Json);
             req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
