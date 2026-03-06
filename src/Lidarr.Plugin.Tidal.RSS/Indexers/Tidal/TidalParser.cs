@@ -20,42 +20,53 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         public IList<ReleaseInfo> ParseResponse(IndexerResponse response)
         {
-            var content = new HttpResponse<TidalSearchResponse>(response.HttpResponse).Content;
-
-            // Check request type from headers
-            var requestType = response.HttpRequest.Headers.ContainsKey("X-Tidal-Request-Type")
-                ? response.HttpRequest.Headers["X-Tidal-Request-Type"]
-                : "";
-
-            // Return cached results if available
-            if (requestType == "CACHED")
+            try
             {
-                Logger.Info("RSS: Returning cached results");
-                return TidalRssCache.GetCachedResults();
-            }
+                var content = new HttpResponse<TidalSearchResponse>(response.HttpResponse).Content;
 
-            // Parse Home page response and cache the results
-            if (requestType == "HOME")
+                // Check request type from headers
+                var requestType = response.HttpRequest.Headers.ContainsKey("X-Tidal-Request-Type")
+                    ? response.HttpRequest.Headers["X-Tidal-Request-Type"]
+                    : "";
+
+                // Return cached results if available
+                if (requestType == "CACHED")
+                {
+                    Logger.Info("RSS: Returning cached results");
+                    return TidalRssCache.GetCachedResults();
+                }
+
+                // Parse Home page response and cache the results
+                if (requestType == "HOME")
+                {
+                    Logger.Info("RSS: Parsing Tidal Home page for new releases");
+                    var releases = ParseHomePageResponse(content);
+                    TidalRssCache.SetCache(releases);
+                    return releases;
+                }
+
+                // Direct album fetch from MusicBrainz cross-reference
+                if (requestType == "MB_ALBUM_DIRECT")
+                {
+                    var lidarrArtist = response.HttpRequest.Headers.ContainsKey("X-Tidal-Lidarr-Artist")
+                        ? response.HttpRequest.Headers["X-Tidal-Lidarr-Artist"]
+                        : null;
+                    Logger.Info("Parsing MusicBrainz direct album lookup response" +
+                        (lidarrArtist != null ? $" (Lidarr artist override: {lidarrArtist})" : ""));
+                    return ParseDirectAlbumResponse(content, lidarrArtist);
+                }
+
+                // Regular search request
+                return ParseSearchResponse(content);
+            }
+            catch (Exception ex)
             {
-                Logger.Info("RSS: Parsing Tidal Home page for new releases");
-                var releases = ParseHomePageResponse(content);
-                TidalRssCache.SetCache(releases);
-                return releases;
+                var url = response?.HttpRequest?.Url?.FullUri ?? "unknown";
+                var requestType = response?.HttpRequest?.Headers?.ContainsKey("X-Tidal-Request-Type") == true
+                    ? response.HttpRequest.Headers["X-Tidal-Request-Type"] : "search";
+                Logger.Error(ex, $"INDEXER-BLOCK-TRAP: Exception in ParseResponse (type={requestType}, url={url}). This will trigger RecordFailure and may block the indexer.");
+                throw;
             }
-
-            // Direct album fetch from MusicBrainz cross-reference
-            if (requestType == "MB_ALBUM_DIRECT")
-            {
-                var lidarrArtist = response.HttpRequest.Headers.ContainsKey("X-Tidal-Lidarr-Artist")
-                    ? response.HttpRequest.Headers["X-Tidal-Lidarr-Artist"]
-                    : null;
-                Logger.Info("Parsing MusicBrainz direct album lookup response" +
-                    (lidarrArtist != null ? $" (Lidarr artist override: {lidarrArtist})" : ""));
-                return ParseDirectAlbumResponse(content, lidarrArtist);
-            }
-
-            // Regular search request
-            return ParseSearchResponse(content);
         }
 
         private IList<ReleaseInfo> ParseDirectAlbumResponse(string content, string lidarrArtistOverride = null)

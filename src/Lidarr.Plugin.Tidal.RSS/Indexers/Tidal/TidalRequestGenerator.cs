@@ -88,18 +88,26 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         private void EnsureTokenValid()
         {
-            if (DateTime.UtcNow > TidalAPI.Instance.Client.ActiveUser.ExpirationDate)
+            try
             {
-                if (TidalAPI.Instance.Client.ActiveUser.ExpirationDate == DateTime.MinValue)
-                    TidalAPI.Instance.Client.ForceRefreshToken().Wait();
-                else
-                    TidalAPI.Instance.Client.IsLoggedIn().Wait();
-            }
+                if (DateTime.UtcNow > TidalAPI.Instance.Client.ActiveUser.ExpirationDate)
+                {
+                    if (TidalAPI.Instance.Client.ActiveUser.ExpirationDate == DateTime.MinValue)
+                        TidalAPI.Instance.Client.ForceRefreshToken().Wait();
+                    else
+                        TidalAPI.Instance.Client.IsLoggedIn().Wait();
+                }
 
-            if (string.IsNullOrEmpty(TidalAPI.Instance.Client.ActiveUser.CountryCode))
+                if (string.IsNullOrEmpty(TidalAPI.Instance.Client.ActiveUser.CountryCode))
+                {
+                    Logger?.Warn("CountryCode is empty after token refresh, re-fetching session data");
+                    TidalAPI.Instance.Client.RefreshSession().Wait();
+                }
+            }
+            catch (Exception ex)
             {
-                Logger?.Warn("CountryCode is empty after token refresh, re-fetching session data");
-                TidalAPI.Instance.Client.RefreshSession().Wait();
+                Logger?.Error(ex, "INDEXER-BLOCK-TRAP: Exception in EnsureTokenValid (token/session refresh failed). This will propagate and may block the indexer.");
+                throw;
             }
         }
 
@@ -107,38 +115,45 @@ namespace NzbDrone.Core.Indexers.Tidal
         {
             var chain = new IndexerPageableRequestChain();
 
-            // Capture the Lidarr artist name for Tier 0 requests.
-            // For classical music, Lidarr uses the composer (e.g. "Franz Schubert") while
-            // Tidal uses the performer (e.g. "Alfred Brendel"). Passing the Lidarr name
-            // via header lets the parser substitute it, preventing "Wrong artist" rejections.
-            var lidarrArtistName = searchCriteria.ArtistQuery;
-
-            // Tier 0: MusicBrainz cross-reference for exact Tidal album match
-            var mbid = searchCriteria.Albums?.FirstOrDefault()?.ForeignAlbumId;
-            if (!string.IsNullOrEmpty(mbid) && HttpClient != null)
+            try
             {
-                var mbResult = MusicBrainzLookupService.Lookup(mbid, HttpClient);
+                // Capture the Lidarr artist name for Tier 0 requests.
+                // For classical music, Lidarr uses the composer (e.g. "Franz Schubert") while
+                // Tidal uses the performer (e.g. "Alfred Brendel"). Passing the Lidarr name
+                // via header lets the parser substitute it, preventing "Wrong artist" rejections.
+                var lidarrArtistName = searchCriteria.ArtistQuery;
 
-                // Strategy A: Direct Tidal URL from MB relations
-                if (mbResult.HasTidalId)
+                // Tier 0: MusicBrainz cross-reference for exact Tidal album match
+                var mbid = searchCriteria.Albums?.FirstOrDefault()?.ForeignAlbumId;
+                if (!string.IsNullOrEmpty(mbid) && HttpClient != null)
                 {
-                    Logger?.Info($"Tier 0 Strategy A: direct Tidal album {mbResult.TidalAlbumId} from MB URL relation");
-                    chain.Add(GetDirectAlbumRequest(mbResult.TidalAlbumId, lidarrArtistName));
-                }
+                    var mbResult = MusicBrainzLookupService.Lookup(mbid, HttpClient);
 
-                // Strategy B: Barcode lookup via Tidal OpenAPI v2, then direct album fetch via v1
-                if (mbResult.HasBarcodes)
-                {
-                    var barcodeAlbumIds = LookupBarcodeAlbumIds(mbResult.Barcodes);
-                    foreach (var albumId in barcodeAlbumIds)
+                    // Strategy A: Direct Tidal URL from MB relations
+                    if (mbResult.HasTidalId)
                     {
-                        Logger?.Info($"Tier 0 Strategy B: barcode resolved to Tidal album {albumId}");
-                        chain.Add(GetDirectAlbumRequest(albumId, lidarrArtistName));
+                        Logger?.Info($"Tier 0 Strategy A: direct Tidal album {mbResult.TidalAlbumId} from MB URL relation");
+                        chain.Add(GetDirectAlbumRequest(mbResult.TidalAlbumId, lidarrArtistName));
+                    }
+
+                    // Strategy B: Barcode lookup via Tidal OpenAPI v2, then direct album fetch via v1
+                    if (mbResult.HasBarcodes)
+                    {
+                        var barcodeAlbumIds = LookupBarcodeAlbumIds(mbResult.Barcodes);
+                        foreach (var albumId in barcodeAlbumIds)
+                        {
+                            Logger?.Info($"Tier 0 Strategy B: barcode resolved to Tidal album {albumId}");
+                            chain.Add(GetDirectAlbumRequest(albumId, lidarrArtistName));
+                        }
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                Logger?.Error(ex, $"INDEXER-BLOCK-TRAP: Exception in GetSearchRequests for [{searchCriteria.ArtistQuery} - {searchCriteria.AlbumQuery}]. This will trigger RecordFailure and may block the indexer.");
+            }
 
-            // Tier 1 (fallback): text search
+            // Tier 1 (fallback): text search — always added, even if Tier 0 throws
             chain.AddTier(GetRequests($"{searchCriteria.ArtistQuery} {searchCriteria.AlbumQuery}"));
             return chain;
         }
