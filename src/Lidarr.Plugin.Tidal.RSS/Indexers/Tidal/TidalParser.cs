@@ -59,6 +59,14 @@ namespace NzbDrone.Core.Indexers.Tidal
                 // Regular search request
                 return ParseSearchResponse(content);
             }
+            catch (Exception ex) when (ex.ToString().Contains("countryCode", StringComparison.OrdinalIgnoreCase))
+            {
+                // Tidal intermittently rejects valid requests with "countryCode parameter missing"
+                // even when countryCode is present in the URL. This is a transient Tidal-side issue
+                // (stale sessionId). Swallow it to prevent RecordFailure from blocking the indexer.
+                Logger.Warn($"Tidal returned 'countryCode parameter missing' (transient, not blocking indexer): {response?.HttpRequest?.Url?.FullUri}");
+                return new List<ReleaseInfo>();
+            }
             catch (Exception ex)
             {
                 var url = response?.HttpRequest?.Url?.FullUri ?? "unknown";
