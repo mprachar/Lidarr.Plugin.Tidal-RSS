@@ -65,6 +65,7 @@ namespace NzbDrone.Core.Indexers.Tidal
                 var requestType = response?.HttpRequest?.Headers?.ContainsKey("X-Tidal-Request-Type") == true
                     ? response.HttpRequest.Headers["X-Tidal-Request-Type"] : "search";
                 Logger.Error(ex, $"INDEXER-BLOCK-TRAP: Exception in ParseResponse (type={requestType}, url={url}). This will trigger RecordFailure and may block the indexer.");
+                TidalRequestGenerator.WriteBlockTrap($"ParseResponse failed (type={requestType}, url={url})", ex);
                 throw;
             }
         }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using NLog;
@@ -13,10 +14,25 @@ namespace NzbDrone.Core.Indexers.Tidal
     {
         private const int PageSize = 100;
         private const int MaxPages = 3;
+        private static readonly string BlockTrapLogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Lidarr", "logs", "tidal-block-trap.log");
 
         public TidalIndexerSettings Settings { get; set; }
         public Logger Logger { get; set; }
         public IHttpClient HttpClient { get; set; }
+
+        internal static void WriteBlockTrap(string message, Exception ex)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(BlockTrapLogPath);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir!);
+                File.AppendAllText(BlockTrapLogPath,
+                    $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message}\n{ex}\n---\n");
+            }
+            catch { /* don't let trap logging break anything */ }
+        }
 
         public virtual IndexerPageableRequestChain GetRecentRequests()
         {
@@ -107,6 +123,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             catch (Exception ex)
             {
                 Logger?.Error(ex, "INDEXER-BLOCK-TRAP: Exception in EnsureTokenValid (token/session refresh failed). This will propagate and may block the indexer.");
+                WriteBlockTrap("EnsureTokenValid failed", ex);
                 throw;
             }
         }
@@ -151,6 +168,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             catch (Exception ex)
             {
                 Logger?.Error(ex, $"INDEXER-BLOCK-TRAP: Exception in GetSearchRequests for [{searchCriteria.ArtistQuery} - {searchCriteria.AlbumQuery}]. This will trigger RecordFailure and may block the indexer.");
+                WriteBlockTrap($"GetSearchRequests failed for [{searchCriteria.ArtistQuery} - {searchCriteria.AlbumQuery}]", ex);
             }
 
             // Tier 1 (fallback): text search — always added, even if Tier 0 throws
