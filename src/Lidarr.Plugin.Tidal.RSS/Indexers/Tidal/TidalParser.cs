@@ -108,7 +108,8 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
 
             return torrentInfos
-                .OrderByDescending(o => o.Size)
+                .OrderByDescending(o => o.Title.Contains("[Explicit]"))
+                .ThenByDescending(o => o.Size)
                 .ToArray();
         }
 
@@ -187,6 +188,7 @@ namespace NzbDrone.Core.Indexers.Tidal
 
             return releases
                 .OrderByDescending(o => o.PublishDate)
+                .ThenByDescending(o => o.Title.Contains("[Explicit]"))
                 .ThenByDescending(o => o.Size)
                 .ToArray();
         }
