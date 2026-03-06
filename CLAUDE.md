@@ -153,3 +153,4 @@ Detailed investigation notes are stored in Claude auto-memory (not in repo). Whe
 | Topic | Memory File | Date |
 |-------|-------------|------|
 | Tidal OpenAPI v2 barcode lookup, HTTP dispatcher bypass, classical artist mismatch | `tidal-openapi-v2-barcode-lookup.md` | 2026-03-05 |
+| Indexer blocking root cause, stability fixes, BLOCK-TRAP diagnostics | `indexer-blocking-and-stability.md` | 2026-03-06 |
