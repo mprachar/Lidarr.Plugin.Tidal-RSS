@@ -172,14 +172,14 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
 
             // Tier 1 (fallback): text search — always added, even if Tier 0 throws
-            chain.AddTier(GetRequests($"{searchCriteria.ArtistQuery} {searchCriteria.AlbumQuery}"));
+            chain.AddTier(GetRequests($"{searchCriteria.ArtistQuery} {searchCriteria.AlbumQuery}", searchCriteria.ArtistQuery));
             return chain;
         }
 
         public IndexerPageableRequestChain GetSearchRequests(ArtistSearchCriteria searchCriteria)
         {
             var chain = new IndexerPageableRequestChain();
-            chain.AddTier(GetRequests(searchCriteria.ArtistQuery));
+            chain.AddTier(GetRequests(searchCriteria.ArtistQuery, searchCriteria.ArtistQuery));
             return chain;
         }
 
@@ -313,7 +313,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             return (true, albumIds);
         }
 
-        private IEnumerable<IndexerRequest> GetRequests(string searchParameters)
+        private IEnumerable<IndexerRequest> GetRequests(string searchParameters, string searchArtist = null)
         {
             EnsureTokenValid();
 
@@ -331,6 +331,8 @@ namespace NzbDrone.Core.Indexers.Tidal
                 var req = new IndexerRequest(url, HttpAccept.Json);
                 req.HttpRequest.Method = System.Net.Http.HttpMethod.Get;
                 req.HttpRequest.Headers.Add("Authorization", $"{TidalAPI.Instance.Client.ActiveUser.TokenType} {TidalAPI.Instance.Client.ActiveUser.AccessToken}");
+                if (!string.IsNullOrEmpty(searchArtist))
+                    req.HttpRequest.Headers.Add("X-Tidal-Search-Artist", searchArtist);
                 yield return req;
             }
         }

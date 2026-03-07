@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using NLog;
@@ -56,8 +59,11 @@ namespace NzbDrone.Core.Indexers.Tidal
                     return ParseDirectAlbumResponse(content, lidarrArtist);
                 }
 
-                // Regular search request
-                return ParseSearchResponse(content);
+                // Regular search request — filter by artist if search context is available
+                var searchArtist = response.HttpRequest.Headers.ContainsKey("X-Tidal-Search-Artist")
+                    ? response.HttpRequest.Headers["X-Tidal-Search-Artist"]
+                    : null;
+                return ParseSearchResponse(content, searchArtist);
             }
             catch (Exception ex) when (ex.ToString().Contains("countryCode", StringComparison.OrdinalIgnoreCase))
             {
@@ -95,7 +101,7 @@ namespace NzbDrone.Core.Indexers.Tidal
             }
         }
 
-        private IList<ReleaseInfo> ParseSearchResponse(string content)
+        private IList<ReleaseInfo> ParseSearchResponse(string content, string searchArtist = null)
         {
             var torrentInfos = new List<ReleaseInfo>();
             var jsonResponse = JObject.Parse(content).ToObject<TidalSearchResponse>();
@@ -105,7 +111,27 @@ namespace NzbDrone.Core.Indexers.Tidal
                 return torrentInfos;
             }
 
-            var releases = jsonResponse.AlbumResults.Items.Select(result => ProcessAlbumResult(result)).ToArray();
+            // Filter albums by artist if search context is available
+            var albumItems = jsonResponse.AlbumResults.Items;
+            if (!string.IsNullOrEmpty(searchArtist))
+            {
+                var totalAlbums = albumItems.Length;
+                albumItems = albumItems.Where(album =>
+                {
+                    var match = album.Artists != null && album.Artists.Any(a => IsArtistMatch(searchArtist, a.Name));
+                    if (!match)
+                    {
+                        var tidalArtist = album.Artists?.FirstOrDefault()?.Name ?? "Unknown";
+                        Logger.Debug($"Filtered: {tidalArtist} - {album.Title} (searched for {searchArtist})");
+                    }
+                    return match;
+                }).ToArray();
+                var removed = totalAlbums - albumItems.Length;
+                if (removed > 0)
+                    Logger.Info($"Filtered {removed} of {totalAlbums} album results (artist mismatch with '{searchArtist}')");
+            }
+
+            var releases = albumItems.Select(result => ProcessAlbumResult(result)).ToArray();
 
             foreach (var task in releases)
             {
@@ -114,10 +140,26 @@ namespace NzbDrone.Core.Indexers.Tidal
 
             if (jsonResponse.TrackResults?.Items != null)
             {
-                foreach (var track in jsonResponse.TrackResults.Items)
+                var trackItems = jsonResponse.TrackResults.Items;
+
+                // Filter tracks by artist if search context is available
+                if (!string.IsNullOrEmpty(searchArtist))
+                {
+                    var totalTracks = trackItems.Length;
+                    trackItems = trackItems.Where(track =>
+                    {
+                        var artists = track.Album?.Artists ?? track.Artists;
+                        return artists != null && artists.Any(a => IsArtistMatch(searchArtist, a.Name));
+                    }).ToArray();
+                    var removedTracks = totalTracks - trackItems.Length;
+                    if (removedTracks > 0)
+                        Logger.Debug($"Filtered {removedTracks} of {totalTracks} track results (artist mismatch with '{searchArtist}')");
+                }
+
+                foreach (var track in trackItems)
                 {
                     // make sure the album hasn't already been processed before doing this
-                    if (!jsonResponse.AlbumResults.Items.Any(a => a.Id == track.Album.Id))
+                    if (!albumItems.Any(a => a.Id == track.Album.Id))
                     {
                         var processTrackTask = ProcessTrackAlbumResultAsync(track);
                         processTrackTask.Wait();
@@ -211,6 +253,30 @@ namespace NzbDrone.Core.Indexers.Tidal
                 .ThenByDescending(o => o.Title.Contains("[Explicit]"))
                 .ThenByDescending(o => o.Size)
                 .ToArray();
+        }
+
+        internal static string NormalizeArtistName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            // Remove diacritics (e.g. ÿ → y)
+            var decomposed = name.Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder();
+            foreach (var c in decomposed)
+            {
+                if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                    sb.Append(c);
+            }
+            var normalized = sb.ToString().ToLowerInvariant();
+            // Strip "the " prefix
+            normalized = Regex.Replace(normalized, @"^the\s+", "");
+            // Remove all non-alphanumeric
+            normalized = Regex.Replace(normalized, @"[^a-z0-9]", "");
+            return normalized;
+        }
+
+        internal static bool IsArtistMatch(string searchArtist, string tidalArtist)
+        {
+            return NormalizeArtistName(searchArtist) == NormalizeArtistName(tidalArtist);
         }
 
         private IEnumerable<ReleaseInfo> ProcessAlbumResult(TidalSearchResponse.Album result, string artistOverride = null)
