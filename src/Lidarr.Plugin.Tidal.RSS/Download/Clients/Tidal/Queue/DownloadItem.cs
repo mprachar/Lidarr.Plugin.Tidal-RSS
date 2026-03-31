@@ -49,6 +49,52 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             return item;
         }
 
+        public static DownloadItem FromPersisted(PersistedDownloadItem persisted)
+        {
+            if (!TidalURL.TryParse(persisted.TidalUrl, out var tidalUrl))
+                return null;
+
+            if (!Enum.TryParse<AudioQuality>(persisted.Quality, out var quality))
+                quality = AudioQuality.HIGH;
+
+            if (!Enum.TryParse<DownloadItemStatus>(persisted.Status, out var status))
+                status = DownloadItemStatus.Queued;
+
+            // Build tracks array from persisted tracks
+            (string id, int chunks)[] tracks = null;
+            if (persisted.Tracks != null && persisted.Tracks.Length > 0)
+            {
+                tracks = persisted.Tracks.Select(t => (t.Id, t.Chunks)).ToArray();
+            }
+
+            JObject tidalAlbum = null;
+            if (!string.IsNullOrEmpty(persisted.TidalAlbumJson))
+            {
+                try { tidalAlbum = JObject.Parse(persisted.TidalAlbumJson); }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Trace.TraceWarning($"Failed to parse persisted Tidal album JSON for {persisted.Id}: {ex.Message}");
+                }
+            }
+
+            return new DownloadItem
+            {
+                ID = persisted.Id,
+                Title = persisted.Title,
+                Artist = persisted.Artist,
+                Explicit = persisted.Explicit,
+                Bitrate = quality,
+                Status = status,
+                TotalSize = persisted.TotalSize,
+                DownloadFolder = persisted.DownloadFolder,
+                _tidalUrl = tidalUrl,
+                _tidalAlbum = tidalAlbum,
+                _tracks = tracks,
+                _chunksTotal = tracks?.Sum(t => t.chunks) ?? 0,
+                _chunksDownloaded = 0,
+            };
+        }
+
         public string ID { get; private set; }
 
         public string Title { get; private set; }
@@ -74,6 +120,30 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
         private (string id, int chunks)[] _tracks;
         private TidalURL _tidalUrl;
         private JObject _tidalAlbum;
+
+        internal TidalURL TidalUrlInfo => _tidalUrl;
+        internal JObject TidalAlbum => _tidalAlbum;
+        internal (string id, int chunks)[] Tracks => _tracks;
+
+        public PersistedDownloadItem ToPersistedItem(string lidarrArtistName)
+        {
+            return new PersistedDownloadItem
+            {
+                Id = ID,
+                TidalUrl = _tidalUrl?.Url,
+                TidalId = _tidalUrl?.Id,
+                Quality = Bitrate.ToString(),
+                Status = Status == DownloadItemStatus.Downloading ? "Queued" : Status.ToString(),
+                Title = Title,
+                Artist = Artist,
+                LidarrArtistName = lidarrArtistName,
+                Explicit = Explicit,
+                TotalSize = TotalSize,
+                DownloadFolder = DownloadFolder,
+                TidalAlbumJson = _tidalAlbum?.ToString(Newtonsoft.Json.Formatting.None),
+                Tracks = _tracks?.Select(t => new PersistedTrack { Id = t.id, Chunks = t.chunks }).ToArray(),
+            };
+        }
 
         public async Task DoDownload(TidalSettings settings, Logger logger, CancellationToken cancellation = default)
         {

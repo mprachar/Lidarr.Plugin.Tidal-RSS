@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using NLog;
@@ -24,18 +25,42 @@ namespace NzbDrone.Core.Download.Clients.Tidal
     {
         private readonly ICached<DateTime?> _startTimeCache;
         private readonly DownloadTaskQueue _taskQueue;
+        private readonly Logger _logger;
+        private readonly object _loadLock = new();
+        private bool _loaded;
 
         public TidalProxy(ICacheManager cacheManager, Logger logger)
         {
             _startTimeCache = cacheManager.GetCache<DateTime?>(GetType(), "startTimes");
+            _logger = logger;
             _taskQueue = new(500, null, logger);
 
             _taskQueue.StartQueueHandler();
         }
 
+        private void EnsureLoaded(TidalSettings settings)
+        {
+            if (_loaded) return;
+            lock (_loadLock)
+            {
+                if (_loaded) return;
+                _loaded = true;
+
+                if (string.IsNullOrEmpty(settings.DownloadPath)) return;
+
+                var persistPath = Path.Combine(settings.DownloadPath, ".tidal-queue.json");
+                _taskQueue.SetPersistPath(persistPath);
+
+                var count = _taskQueue.LoadPersistedItems();
+                if (count > 0)
+                    _logger.Info($"Restored {count} persisted Tidal download items from {persistPath}");
+            }
+        }
+
         public List<DownloadClientItem> GetQueue(TidalSettings settings)
         {
             _taskQueue.SetSettings(settings);
+            EnsureLoaded(settings);
 
             var listing = _taskQueue.GetQueueListing();
             var completed = listing.Where(x => x.Status == DownloadItemStatus.Completed);
@@ -50,6 +75,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal
         public void RemoveFromQueue(string downloadId, TidalSettings settings)
         {
             _taskQueue.SetSettings(settings);
+            EnsureLoaded(settings);
 
             var item = _taskQueue.GetQueueListing().FirstOrDefault(a => a.ID == downloadId);
             if (item != null)
@@ -59,6 +85,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal
         public async Task<string> Download(RemoteAlbum remoteAlbum, TidalSettings settings)
         {
             _taskQueue.SetSettings(settings);
+            EnsureLoaded(settings);
 
             var downloadItem = await DownloadItem.From(remoteAlbum);
             await _taskQueue.QueueBackgroundWorkItemAsync(downloadItem);
