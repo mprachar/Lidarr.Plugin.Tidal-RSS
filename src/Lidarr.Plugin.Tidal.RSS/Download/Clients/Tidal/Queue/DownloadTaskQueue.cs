@@ -22,6 +22,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
 
         private TidalSettings _settings;
         private readonly Logger _logger;
+        private string _persistPath;
 
         public DownloadTaskQueue(int capacity, TidalSettings settings, Logger logger)
         {
@@ -38,6 +39,8 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
 
         public void SetSettings(TidalSettings settings) => _settings = settings;
 
+        public void SetPersistPath(string path) => _persistPath = path;
+
         public void StartQueueHandler()
         {
             Task.Run(() => BackgroundProcessing());
@@ -53,6 +56,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
                 {
                     var token = GetTokenForItem(item);
                     item.Status = DownloadItemStatus.Downloading;
+                    PersistQueue();
                     await task;
                 }
                 catch (TaskCanceledException) { }
@@ -68,6 +72,7 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
                     semaphore.Release();
                     lock (_lock)
                         _runningTasks.Remove(task);
+                    PersistQueue();
                 }
             }
 
@@ -93,8 +98,12 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
         {
             await _queue.Writer.WriteAsync(workItem);
             CancellationTokenSource token = new();
-            _items.Add(workItem);
-            _cancellationSources.Add(workItem, token);
+            lock (_lock)
+            {
+                _items.Add(workItem);
+                _cancellationSources.Add(workItem, token);
+            }
+            PersistQueue();
         }
 
         private async ValueTask<DownloadItem> DequeueAsync(CancellationToken cancellationToken)
@@ -108,23 +117,94 @@ namespace NzbDrone.Core.Download.Clients.Tidal.Queue
             if (workItem == null)
                 return;
 
-            _cancellationSources[workItem].Cancel();
+            lock (_lock)
+            {
+                if (_cancellationSources.TryGetValue(workItem, out var cts))
+                    cts.Cancel();
 
-            _items.Remove(workItem);
-            _cancellationSources.Remove(workItem);
+                _items.Remove(workItem);
+                _cancellationSources.Remove(workItem);
+            }
+            PersistQueue();
         }
 
         public DownloadItem[] GetQueueListing()
         {
-            return _items.ToArray();
+            lock (_lock)
+                return _items.ToArray();
         }
 
         public CancellationToken GetTokenForItem(DownloadItem item)
         {
-            if (_cancellationSources.TryGetValue(item, out var src))
-                return src!.Token;
+            lock (_lock)
+            {
+                if (_cancellationSources.TryGetValue(item, out var src))
+                    return src!.Token;
+                return default;
+            }
+        }
 
-            return default;
+        public int LoadPersistedItems()
+        {
+            if (_persistPath == null) return 0;
+
+            var persisted = QueuePersistence.Load(_persistPath, _logger);
+            var loaded = 0;
+
+            lock (_lock)
+            {
+                var existingUrls = new HashSet<string>(_items
+                    .Where(i => i.TidalUrlInfo != null)
+                    .Select(i => i.TidalUrlInfo.Url));
+
+                foreach (var p in persisted)
+                {
+                    try
+                    {
+                        // Deduplicate by Tidal URL
+                        if (existingUrls.Contains(p.TidalUrl))
+                            continue;
+
+                        var item = DownloadItem.FromPersisted(p);
+                        if (item == null) continue;
+
+                        _items.Add(item);
+                        _cancellationSources.Add(item, new CancellationTokenSource());
+
+                        // Only enqueue Queued items to the channel for processing
+                        // Completed/Failed items just sit in _items for Lidarr to see
+                        if (item.Status == DownloadItemStatus.Queued)
+                        {
+                            _queue.Writer.TryWrite(item);
+                        }
+
+                        existingUrls.Add(p.TidalUrl);
+                        loaded++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"Failed to restore persisted download item {p.Id}: {ex.Message}");
+                    }
+                }
+
+            }
+
+            // Re-persist to clean up any items that failed to restore
+            if (loaded < persisted.Count)
+                PersistQueue();
+
+            return loaded;
+        }
+
+        private void PersistQueue()
+        {
+            if (_persistPath == null) return;
+            List<PersistedDownloadItem> snapshot;
+            lock (_lock)
+            {
+                snapshot = _items.Select(i => i.ToPersistedItem(i.RemoteAlbum?.Artist?.Name)).ToList();
+            }
+            QueuePersistence.Save(snapshot, _persistPath, _logger);
         }
     }
 }
