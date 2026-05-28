@@ -60,19 +60,19 @@ Launch 3 agents in parallel to analyze the completed work:
 
 **Step 1.1: Implementation Analysis** (parallel)
 * INVOKE Task tool:
-  - subagent_type: "codebase-researcher"
+  - subagent_type: "compound-engineering:ce-repo-research-analyst"
   - description: "Analyze implementation patterns"
   - prompt: "Analyze the completed work: {task_description}. Files changed: {files_list}. Identify: (1) Patterns used in the implementation, (2) Architecture decisions visible in the code, (3) Integration points created or modified, (4) Testing approach used, (5) Code conventions followed. Provide structured analysis with file:line references."
 
 **Step 1.2: Decision Extraction** (parallel)
 * INVOKE Task tool:
-  - subagent_type: "linus-kernel-planner"
+  - subagent_type: "parslee-dev:linus-kernel-planner"
   - description: "Extract key decisions"
   - prompt: "Review the completed work: {task_description}. Diff: {diff_summary}. Extract: (1) Key decisions made and WHY they were made, (2) Alternative approaches that were likely considered and rejected, (3) Simplifications achieved (complexity avoided), (4) Trade-offs accepted, (5) What makes this solution good (or problematic). Be specific about the reasoning behind choices."
 
 **Step 1.3: Problem-Solution Mapping** (parallel)
 * INVOKE Task tool:
-  - subagent_type: "debug-detective"
+  - subagent_type: "compound-engineering:ce-git-history-analyzer"
   - description: "Document problem-solution"
   - prompt: "Analyze the problem-solution for: {task_description}. Document: (1) Original problem statement (what was broken or missing), (2) Root cause (if bug fix), (3) Solution approach taken, (4) Edge cases handled, (5) Gotchas discovered during implementation, (6) What someone working in this area should know. Focus on practical insights."
 
