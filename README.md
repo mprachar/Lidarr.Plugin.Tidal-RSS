@@ -24,6 +24,34 @@ This fork adds RSS feed support, allowing Lidarr to automatically monitor and do
 
 When configured, Lidarr's RSS sync will periodically check these artists for new album releases.
 
+## Manual Album Pins (New in this fork)
+
+Some albums can't be found by any automatic strategy. Classical is the worst case: Lidarr
+tracks the **composer** while Tidal credits the **performer**, so the text search results get
+discarded by the artist pre-filter — and the MusicBrainz fallbacks only help when MB actually
+has a Tidal URL relation or a barcode that Tidal's v2 API recognises.
+
+A pin forces one specific Lidarr album to one specific Tidal album. Pinned albums skip the
+MusicBrainz lookup *and* the text search entirely, so they can never be filtered out.
+
+### Configuration
+
+Indexer settings → **Manual Album Pins** (advanced). Each row is a key/value pair:
+
+| Key | Value |
+|-----|-------|
+| `Giuseppe Verdi - Aida` | `https://tidal.com/album/513237487` |
+| `Antonín Dvořák - The Nine Symphonies` | `4447766` |
+| `11452c8f-af1b-426d-9b14-03eef82e05b2` | `513237487` |
+
+- **Key** — `Artist - Album` exactly as Lidarr names them, or the album's MusicBrainz
+  release-group ID. Matching ignores case, spacing and accents, so `Antonin Dvorak - the nine
+  symphonies` also works.
+- **Value** — a Tidal album ID or any `tidal.com` album URL.
+
+The Lidarr artist name is still forced onto the resulting release, so a pinned classical album
+imports under the composer rather than the performer.
+
 ## Installation
 This requires your Lidarr setup to be using the `plugins` branch. My docker-compose is setup like the following.
 ```yml
