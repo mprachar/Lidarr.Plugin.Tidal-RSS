@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FluentValidation;
 using NzbDrone.Core.Annotations;
 using NzbDrone.Core.Validation;
@@ -32,6 +33,9 @@ namespace NzbDrone.Core.Indexers.Tidal
 
         [FieldDefinition(3, Type = FieldType.Number, Label = "Early Download Limit", Unit = "days", HelpText = "Time before release date Lidarr will download from this indexer, empty is no limit", Advanced = true)]
         public int? EarlyReleaseLimit { get; set; }
+
+        [FieldDefinition(4, Type = FieldType.KeyValueList, Label = "Manual Album Pins", HelpText = "Force a specific album to a specific Tidal album. Key: 'Artist - Album' as Lidarr knows it, or the album's MusicBrainz release-group ID. Value: a Tidal album ID or tidal.com album URL. A pinned album skips both the MusicBrainz lookup and the text search, so it is never dropped by artist matching — use this for classical, where Lidarr tracks the composer but Tidal credits the performer.", Advanced = true)]
+        public IEnumerable<KeyValuePair<string, string>> AlbumPins { get; set; } = new List<KeyValuePair<string, string>>();
 
         // this is hardcoded so this doesn't need to exist except that it's required by the interface
         public string BaseUrl { get; set; } = "";

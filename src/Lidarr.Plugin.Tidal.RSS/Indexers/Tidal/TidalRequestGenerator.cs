@@ -140,8 +140,22 @@ namespace NzbDrone.Core.Indexers.Tidal
                 // via header lets the parser substitute it, preventing "Wrong artist" rejections.
                 var lidarrArtistName = searchCriteria.ArtistQuery;
 
-                // Tier 0: MusicBrainz cross-reference for exact Tidal album match
                 var mbid = searchCriteria.Albums?.FirstOrDefault()?.ForeignAlbumId;
+
+                // Manual pin: an operator-supplied Lidarr-album -> Tidal-album mapping.
+                // Highest priority, and deliberately terminal — it returns before the Tier 1
+                // text search is appended, so a pinned album can never be discarded by the
+                // artist pre-filter. This is the only path that works for releases MusicBrainz
+                // can't resolve (no Tidal URL relation, no matching barcode on Tidal v2).
+                var pinnedId = TidalAlbumPin.Resolve(Settings?.AlbumPins, mbid, searchCriteria.ArtistQuery, searchCriteria.AlbumQuery);
+                if (!string.IsNullOrEmpty(pinnedId))
+                {
+                    Logger?.Info($"Tier 0 manual pin: [{searchCriteria.ArtistQuery} - {searchCriteria.AlbumQuery}] -> Tidal album {pinnedId} (skipping MusicBrainz and text search)");
+                    chain.Add(GetDirectAlbumRequest(pinnedId, lidarrArtistName));
+                    return chain;
+                }
+
+                // Tier 0: MusicBrainz cross-reference for exact Tidal album match
                 if (!string.IsNullOrEmpty(mbid) && HttpClient != null)
                 {
                     var mbResult = MusicBrainzLookupService.Lookup(mbid, HttpClient);
