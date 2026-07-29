@@ -154,3 +154,7 @@ Detailed investigation notes are stored in Claude auto-memory (not in repo). Whe
 |-------|-------------|------|
 | Tidal OpenAPI v2 barcode lookup, HTTP dispatcher bypass, classical artist mismatch | `tidal-openapi-v2-barcode-lookup.md` | 2026-03-05 |
 | Indexer blocking root cause, stability fixes, BLOCK-TRAP diagnostics | `indexer-blocking-and-stability.md` | 2026-03-06 |
+| Artist pre-filter for search results (Lidarr prefix-match bug workaround) | `artist-prefilter.md` | 2026-03-07 |
+| Mass search queue pollution, command persistence, cross-indexer cascades | `mass-search-queue-pollution.md` | 2026-03-08 |
+| Queue persistence: atomic writes, DTO mapping, thread safety, deferred loading | `queue-persistence.md` | 2026-03-31 |
+| Manual Album Pins; classical Tier-0 dead ends; build/release gotchas (NuGetAudit, archived repo, draft releases); FLAC-beats-MP3 conversion order | `manual-album-pins.md` | 2026-07-28 |

@@ -8,6 +8,7 @@ This plugin provides a Tidal indexer and downloader client for Lidarr.
 
 | This Fork | Based On | Changes |
 |-----------|----------|---------|
+| 10.1.0.4327 | TrevTV 10.1.0.42 | Manual Album Pins — force a Lidarr album to a specific Tidal album, bypassing MusicBrainz lookup and text search |
 | 10.1.0.42-rss.1 | TrevTV 10.1.0.42 | Added RSS feed support for artist monitoring |
 
 ## RSS Feature (New in this fork)
