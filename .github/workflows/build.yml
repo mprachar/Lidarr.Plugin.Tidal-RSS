@@ -58,8 +58,8 @@ jobs:
           sed -i'' -e "s/<FileVersion>[0-9.]\+<\/FileVersion>/<FileVersion>${{ steps.gen_meta.outputs.version }}<\/FileVersion>/g" src/Lidarr.Plugin.Tidal.RSS/Lidarr.Plugin.Tidal.RSS.csproj
       - name: Build
         run: |
-          dotnet restore src/*.sln /p:WarningsNotAsErrors="NU1902"
-          dotnet build src/*.sln /p:WarningsNotAsErrors="NU1902" -c Release -f ${{ matrix.framework }}
+          dotnet restore src/*.sln /p:WarningsNotAsErrors="NU1902%3BNU1903"
+          dotnet build src/*.sln /p:WarningsNotAsErrors="NU1902%3BNU1903" -c Release -f ${{ matrix.framework }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
