@@ -12,17 +12,22 @@ namespace NzbDrone.Core.Indexers.Tidal
 {
     public struct MusicBrainzLookupResult
     {
+        private readonly IReadOnlyList<string> _barcodes;
+
         public string TidalAlbumId { get; }
-        public IReadOnlyList<string> Barcodes { get; }
+
+        // default(MusicBrainzLookupResult) skips the constructor, and failed lookups are
+        // cached as default — so the null-guard must live in the getter, not the ctor.
+        public IReadOnlyList<string> Barcodes => _barcodes ?? Array.Empty<string>();
 
         public MusicBrainzLookupResult(string tidalAlbumId, IReadOnlyList<string> barcodes)
         {
             TidalAlbumId = tidalAlbumId;
-            Barcodes = barcodes ?? Array.Empty<string>();
+            _barcodes = barcodes;
         }
 
         public bool HasTidalId => !string.IsNullOrEmpty(TidalAlbumId);
-        public bool HasBarcodes => Barcodes?.Count > 0;
+        public bool HasBarcodes => Barcodes.Count > 0;
         public bool IsEmpty => !HasTidalId && !HasBarcodes;
     }
 
